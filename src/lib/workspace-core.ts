@@ -119,7 +119,7 @@ export async function doGetWorkspaces(): Promise<WorkspacesResult> {
             or exists (
               select 1 from invitations i
               where i.workspace_id = cw.id
-                and i.status in ('joined','verified')
+                and i.status in ('invited','joined','verified')
                 and lower(i.email) = lower(${user.email})
             )
          order by cw.created_at desc`,
@@ -204,7 +204,7 @@ export async function doUpdateWorkspace(
       tx`update contract_workspaces
          set title = ${title}, description = ${cleanText(input.description, 2000) || null},
              status = ${status}, updated_at = now()
-         where id = ${workspaceId}`,
+         where id = ${workspaceId} and lead_contractor_id = ${user.id}`,
       auditQuery(tx, user.id, "workspace.update", { workspaceId, title, status }),
     ]);
     return { ok: true };
@@ -234,13 +234,27 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
            (select count(*) from work_packages wp where wp.workspace_id = cw.id) as package_count,
            (select count(*) from invitations i1 where i1.workspace_id = cw.id and i1.status = 'invited') as invited_count,
            (select count(*) from invitations i2 where i2.workspace_id = cw.id and i2.status in ('joined','verified')) as joined_count
-         from contract_workspaces cw where cw.id = ${workspaceId}`,
+         from contract_workspaces cw
+         where cw.id = ${workspaceId}
+           and (cw.lead_contractor_id = ${user.id} or exists (
+             select 1 from invitations i
+             where i.workspace_id = cw.id
+               and lower(i.email) = lower(${user.email})
+               and i.status in ('invited','joined','verified')
+           ))`,
       tx`select id, workspace_id, name, description, scope_notes, category, status, created_at, updated_at
-         from work_packages where workspace_id = ${workspaceId} order by created_at asc`,
+         from work_packages where workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = work_packages.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i where i.workspace_id = cw.id and lower(i.email) = lower(${user.email}) and i.status in ('invited','joined','verified'))))
+         order by created_at asc`,
       tx`select id, workspace_id, email, company_name, participant_role, work_package, status, created_at, responded_at
-         from invitations where workspace_id = ${workspaceId} order by created_at desc`,
+         from invitations where workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = invitations.workspace_id and cw.lead_contractor_id = ${user.id})
+         order by created_at desc`,
       tx`select id, action, details, created_at from audit_logs
-         where workspace_id = ${workspaceId} order by created_at desc limit 20`,
+         where workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = audit_logs.workspace_id and cw.lead_contractor_id = ${user.id})
+         order by created_at desc limit 20`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -375,11 +389,13 @@ export async function doCreateWorkPackage(
     await asUser(user.id, user.role, (tx) => [
       tx`insert into work_packages
            (id, workspace_id, name, description, scope_notes, category, created_by, updated_by)
-         values (${packageId}, ${workspaceId}, ${name},
-                 ${cleanText(input.description, 2000) || null},
-                 ${cleanText(input.scopeNotes, 4000) || null},
-                 ${cleanText(input.category, 100) || null},
-                 ${user.id}, ${user.id})`,
+         select ${packageId}, ${workspaceId}, ${name},
+                ${cleanText(input.description, 2000) || null},
+                ${cleanText(input.scopeNotes, 4000) || null},
+                ${cleanText(input.category, 100) || null},
+                ${user.id}, ${user.id}
+         where exists (select 1 from contract_workspaces cw
+                       where cw.id = ${workspaceId} and cw.lead_contractor_id = ${user.id})`,
       auditQuery(tx, user.id, "work_package.create", { workspaceId, packageId, name }),
     ]);
     return { ok: true };
@@ -407,7 +423,8 @@ export async function doDeleteWorkPackage(
     }
 
     await asUser(user.id, user.role, (tx) => [
-      tx`delete from work_packages where id = ${packageId} and workspace_id = ${workspaceId}`,
+      tx`delete from work_packages where id = ${packageId} and workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = work_packages.workspace_id and cw.lead_contractor_id = ${user.id})`,
       auditQuery(tx, user.id, "work_package.delete", { workspaceId, packageId }),
     ]);
     return { ok: true };
@@ -480,12 +497,14 @@ export async function doInviteCompany(
               participant_role = ${participantRole}, work_package = ${workPackage || null},
               responded_at = null, joined_at = null, verified_at = null,
               updated_at = now()
-            where id = ${existing.id}`
+            where id = ${existing.id} and workspace_id = ${workspaceId}
+              and exists (select 1 from contract_workspaces cw where cw.id = invitations.workspace_id and cw.lead_contractor_id = ${user.id})`
         : tx`insert into invitations
               (id, workspace_id, email, company_name, participant_role, work_package, created_by)
             values (${invitationId}, ${workspaceId}, ${email},
                     ${companyName || null}, ${participantRole}, ${workPackage || null},
-                    ${user.id})`,
+                    ${user.id})
+              on conflict (id) do nothing`,
       ...(ownerRows[0]
         ? [
             tx`insert into notifications (id, user_id, workspace_id, type, title, body, link)
@@ -527,7 +546,7 @@ export async function doRespondToInvitation(
 
     // RLS: the caller can only see invitations addressed to their own email.
     const rows = (await asUser(user.id, user.role, (tx) => [
-      tx`select id, workspace_id, email, status from invitations where id = ${invitationId}`,
+      tx`select id, workspace_id, email, status from invitations where id = ${invitationId} and lower(email) = lower(${user.email}) and status = 'invited'`,
     ]))[1] as { id: string; workspace_id: string; email: string; status: string }[];
     const inv = rows[0];
     if (!inv) return { ok: false, error: "Invitation not found." };
@@ -553,7 +572,8 @@ export async function doRespondToInvitation(
              joined_at = ${response === "accept" ? new Date() : null},
              company_id = ${user.companyId ?? null},
              updated_at = now()
-         where id = ${invitationId}`,
+         where id = ${invitationId}
+           and lower(email) = lower(${user.email}) and status = 'invited'`,
       // Notify the workspace lead (RLS notifications_insert allows this: the
       // caller's invitation is now joined/declined in this workspace, and the
       // notification's target user is that workspace's lead).
@@ -608,7 +628,8 @@ export async function doVerifyParticipant(
     await asUser(user.id, user.role, (tx) => [
       // RLS: only a joined participant can be moved to verified.
       tx`update invitations set status = 'verified', verified_at = now(), updated_at = now()
-         where id = ${invitationId} and status = 'joined'`,
+         where id = ${invitationId} and status = 'joined'
+           and exists (select 1 from contract_workspaces cw where cw.id = invitations.workspace_id and cw.lead_contractor_id = ${user.id})`,
       ...(ownerRows[0]
         ? [
             tx`insert into notifications (id, user_id, workspace_id, type, title, body, link)

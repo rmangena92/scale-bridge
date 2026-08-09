@@ -1,6 +1,10 @@
 /**
  * Server-only database access layer.
  *
+ * SECURITY: Neon’s neondb_owner role has rolbypassrls=true, so RLS is not
+ * enforceable for this application. Explicit app-layer SQL predicates are the
+ * security boundary; FORCE RLS remains enabled as defense-in-depth.
+ *
  * `sql` comes from ~/db (the sandbox's built-in neon helper). This module adds
  * two transaction scopes used by every server function:
  *

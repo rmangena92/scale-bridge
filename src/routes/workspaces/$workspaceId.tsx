@@ -1,0 +1,873 @@
+import { createFileRoute, Link, redirect, useSearch } from "@tanstack/react-router";
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { AppShell } from "~/components/AppShell";
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmButton,
+  DbSetupPage,
+  EmptyState,
+  ErrorText,
+  Field,
+  Input,
+  Select,
+  Textarea,
+} from "~/components/ui";
+import { getSessionUser } from "~/lib/auth";
+import {
+  createWorkPackage,
+  deleteWorkPackage,
+  getWorkspace,
+  inviteCompany,
+  updateWorkspace,
+  verifyParticipant,
+} from "~/lib/workspace";
+import {
+  INVITATION_BADGE_TONES,
+  INVITATION_STATUS_LABELS,
+  PARTICIPANT_ROLE_LABELS,
+  PARTICIPANT_ROLES,
+  WORKSPACE_BADGE_TONES,
+  WORKSPACE_STATUSES,
+  WORKSPACE_STATUS_LABELS,
+} from "~/lib/types";
+import type {
+  AuditEntry,
+  ParticipantRole,
+  PublicInvitation,
+  PublicUser,
+  PublicWorkPackage,
+  PublicWorkspace,
+  WorkspaceStatus,
+} from "~/lib/types";
+import type { WorkspaceDetailResult } from "~/lib/workspace";
+
+// Spec tab order — the first three are implemented this phase; the rest are
+// scaffolded as disabled placeholders so the structure matches the spec.
+const TAB_ORDER = [
+  "overview",
+  "companies",
+  "packages",
+  "documents",
+  "pricing",
+  "tasks",
+  "milestones",
+  "messages",
+  "approvals",
+  "variations",
+  "invoices",
+  "performance",
+  "audit",
+  "settings",
+] as const;
+
+type TabId = (typeof TAB_ORDER)[number];
+
+const TAB_LABELS: Record<TabId, string> = {
+  overview: "Overview",
+  companies: "Participating Companies",
+  packages: "Scope & Work Packages",
+  documents: "Documents",
+  pricing: "Pricing & Commercials",
+  tasks: "Tasks",
+  milestones: "Milestones",
+  messages: "Messages",
+  approvals: "Approvals",
+  variations: "Variations",
+  invoices: "Invoices",
+  performance: "Performance",
+  audit: "Audit Log",
+  settings: "Settings",
+};
+
+const ACTIVE_TABS: TabId[] = ["overview", "companies", "packages"];
+
+export const Route = createFileRoute("/workspaces/$workspaceId")({
+  loader: async ({ params }) => {
+    const session = await getSessionUser();
+    if (session.setupRequired) {
+      return { setupRequired: true as const, user: null, detail: null as null };
+    }
+    if (!session.user) throw redirect({ to: "/login" });
+    const detail = await getWorkspace({ data: { workspaceId: params.workspaceId } });
+    return {
+      setupRequired: false as const,
+      user: session.user,
+      detail: detail.ok ? detail : null,
+    };
+  },
+  component: WorkspaceDetailPage,
+});
+
+function WorkspaceDetailPage() {
+  const loader = Route.useLoaderData();
+  if (loader.setupRequired || !loader.user) {
+    return (
+      <DbSetupPage title="Workspace">
+        Connect a Postgres database (DATABASE_URL) and re-run `bun run publish`
+        to open contract workspaces.
+      </DbSetupPage>
+    );
+  }
+  if (!loader.detail) {
+    return (
+      <AppShell user={loader.user}>
+        <Card className="p-8 text-center">
+          <p className="font-display text-xl font-bold text-navy">
+            Workspace not found
+          </p>
+          <p className="mt-2 text-sm text-muted">
+            It may have been removed, or you don't have access to it.
+          </p>
+          <Link
+            to="/workspaces"
+            className="mt-5 inline-block text-sm font-semibold text-brand hover:underline"
+          >
+            ← Back to your workspaces
+          </Link>
+        </Card>
+      </AppShell>
+    );
+  }
+  return <WorkspaceBody user={loader.user} detail={loader.detail} />;
+}
+
+function WorkspaceBody({
+  user,
+  detail,
+}: {
+  user: PublicUser;
+  detail: WorkspaceDetailResult;
+}) {
+  const search = useSearch({ strict: false }) as { tab?: string };
+  if (!detail.ok) {
+    return (
+      <AppShell user={user}>
+        <Card className="p-8 text-center">
+          <p className="font-display text-xl font-bold text-navy">
+            Couldn't open this workspace
+          </p>
+          <p className="mt-2 text-sm text-muted">{detail.error}</p>
+          <Link
+            to="/workspaces"
+            className="mt-5 inline-block text-sm font-semibold text-brand hover:underline"
+          >
+            ← Back to your workspaces
+          </Link>
+        </Card>
+      </AppShell>
+    );
+  }
+  const [data, setData] = useState(detail);
+  const [tab, setTab] = useState<TabId>(() =>
+    ACTIVE_TABS.includes(search.tab as TabId)
+      ? (search.tab as TabId)
+      : "overview",
+  );
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function refresh() {
+    const result = await getWorkspace({ data: { workspaceId: data.workspace.id } });
+    if (result.ok) setData(result);
+  }
+
+  const { workspace, isLead, packages, invitations, audit } = data;
+
+  return (
+    <AppShell user={user}>
+      <div className="mb-6">
+        <Link
+          to="/workspaces"
+          className="text-sm font-semibold text-brand hover:underline"
+        >
+          ← All workspaces
+        </Link>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold sm:text-3xl">{workspace.title}</h1>
+              <Badge tone={WORKSPACE_BADGE_TONES[workspace.status]}>
+                {WORKSPACE_STATUS_LABELS[workspace.status]}
+              </Badge>
+              {isLead ? (
+                <Badge tone="navy">Lead contractor</Badge>
+              ) : (
+                <Badge tone="teal">Participant</Badge>
+              )}
+            </div>
+            {workspace.description && (
+              <p className="mt-2 max-w-2xl text-sm text-muted">
+                {workspace.description}
+              </p>
+            )}
+          </div>
+          <div className="text-right text-xs text-muted">
+            <p>
+              Created{" "}
+              {new Date(workspace.createdAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
+            <p className="mt-0.5">
+              {workspace.packageCount} packages · {workspace.joinedCount} joined ·{" "}
+              {workspace.invitedCount} invited
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="mb-4">
+          <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm font-medium text-success">
+            {notice}
+          </p>
+        </div>
+      )}
+
+      <div className="mb-6 flex flex-wrap gap-1.5 border-b border-slate-200 pb-px">
+        {TAB_ORDER.map((t) => {
+          const active = ACTIVE_TABS.includes(t);
+          return (
+            <button
+              key={t}
+              type="button"
+              disabled={!active}
+              onClick={() => setTab(t)}
+              title={active ? undefined : "Coming in a later phase"}
+              className={
+                active
+                  ? `rounded-t-lg border-b-2 px-3.5 py-2 text-sm font-semibold transition-colors ${
+                      tab === t
+                        ? "border-brand text-brand"
+                        : "border-transparent text-muted hover:text-navy"
+                    }`
+                  : "cursor-not-allowed rounded-t-lg border-b-2 border-transparent px-3.5 py-2 text-sm font-semibold text-slate-300"
+              }
+            >
+              {TAB_LABELS[t]}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "overview" && (
+        <OverviewTab
+          workspace={workspace}
+          isLead={isLead}
+          audit={audit}
+          onStatusChange={async () => {
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "companies" && isLead && (
+        <CompaniesTab
+          workspace={workspace}
+          invitations={invitations}
+          packages={packages}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "companies" && !isLead && (
+        <Card className="p-8 text-center">
+          <p className="text-sm text-muted">
+            The participant list is private to the lead contractor — other
+            companies' details are never shared across the workspace.
+          </p>
+        </Card>
+      )}
+      {tab === "packages" && (
+        <PackagesTab
+          workspace={workspace}
+          packages={packages}
+          isLead={isLead}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {!ACTIVE_TABS.includes(tab) && <PlaceholderTab tab={tab} />}
+    </AppShell>
+  );
+}
+
+// ------------------------------------------------------------------- tabs
+function PlaceholderTab({ tab }: { tab: TabId }) {
+  return (
+    <Card className="p-8">
+      <div className="flex items-start gap-4">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-mist text-teal">
+          <svg
+            viewBox="0 0 24 24"
+            className="size-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 8v4l2.5 2.5M12 3a9 9 0 100 18 9 9 0 000-18z" />
+          </svg>
+        </span>
+        <div>
+          <h2 className="text-lg font-bold">{TAB_LABELS[tab]}</h2>
+          <p className="mt-1 text-sm text-muted">
+            This area is part of the ScaleBridge roadmap and will arrive in a
+            later phase. The tab is in place now so the workspace structure
+            matches the full specification.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function OverviewTab({
+  workspace,
+  isLead,
+  audit,
+  onStatusChange,
+}: {
+  workspace: PublicWorkspace;
+  isLead: boolean;
+  audit: AuditEntry[];
+  onStatusChange: () => Promise<void>;
+}) {
+  const [status, setStatus] = useState<WorkspaceStatus>(workspace.status);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function saveStatus() {
+    if (status === workspace.status) return;
+    setError(null);
+    setPending(true);
+    const result = await updateWorkspace({ data: { workspaceId: workspace.id,
+      input: {
+        title: workspace.title,
+        description: workspace.description ?? "",
+        status,
+      }, } });
+    setPending(false);
+    if (result.ok) {
+      await onStatusChange();
+    } else {
+      setError(result.error);
+    }
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <h2 className="text-lg font-bold">Contract overview</h2>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+            <OverviewField label="Status" value={WORKSPACE_STATUS_LABELS[workspace.status]} />
+            <OverviewField
+              label="Description"
+              value={workspace.description ?? "No description yet."}
+            />
+            <OverviewField
+              label="Work packages"
+              value={`${workspace.packageCount} defined`}
+            />
+            <OverviewField
+              label="Participants"
+              value={`${workspace.joinedCount} joined · ${workspace.invitedCount} invited`}
+            />
+          </dl>
+          {isLead && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveStatus();
+              }}
+              className="mt-5 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-5"
+            >
+              <Field label="Move workspace to" htmlFor="ov-status">
+                <Select
+                  id="ov-status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as WorkspaceStatus)}
+                >
+                  {WORKSPACE_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {WORKSPACE_STATUS_LABELS[s]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={pending || status === workspace.status}
+              >
+                {pending ? "Saving…" : "Update status"}
+              </Button>
+              {error && <ErrorText>{error}</ErrorText>}
+            </form>
+          )}
+        </Card>
+
+        {isLead && (
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold">Recent activity</h2>
+              <Badge tone="slate">Audit trail</Badge>
+            </div>
+            {audit.length === 0 ? (
+              <p className="mt-4 text-sm text-muted">
+                No activity yet — actions like invites and verifications are
+                logged here automatically.
+              </p>
+            ) : (
+              <ul className="mt-4 divide-y divide-slate-100">
+                {audit.slice(0, 10).map((a) => (
+                  <li key={a.id} className="flex items-center justify-between gap-4 py-2.5 text-sm">
+                    <span className="font-medium text-ink">{AUDIT_LABELS[a.action] ?? a.action}</span>
+                    <span className="shrink-0 text-xs text-muted">
+                      {new Date(a.createdAt).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-6">
+        <Card className="p-6">
+          <h2 className="text-lg font-bold">Your access</h2>
+          <p className="mt-2 text-sm text-muted">
+            {isLead
+              ? "You lead this workspace — you can manage packages, invite companies and verify participants."
+              : "You're a participant here. You can see the scope and work packages you were invited into, and your own invitation status."}
+          </p>
+        </Card>
+        <Card className="p-6">
+          <h2 className="text-lg font-bold">Isolation</h2>
+          <p className="mt-2 text-xs leading-relaxed text-muted">
+            ScaleBridge keeps every company's pricing, documents and commercial
+            terms private to the workspace. Other participants never see your
+            data unless the lead explicitly shares it.
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function OverviewField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt>
+      <dd className="mt-1 text-sm text-ink">{value}</dd>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ companies tab
+function CompaniesTab({
+  workspace,
+  invitations,
+  packages,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  invitations: PublicInvitation[];
+  packages: PublicWorkPackage[];
+  onChanged: (message: string) => Promise<void>;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">Participant pipeline</h2>
+            <div className="flex items-center gap-1.5 text-xs text-muted">
+              <Badge tone="blue">Invited</Badge>
+              <span>→</span>
+              <Badge tone="teal">Joined</Badge>
+              <span>→</span>
+              <Badge tone="green">Verified</Badge>
+            </div>
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            Companies you've invited, their responses, and their status. Only
+            you can see this list.
+          </p>
+          {invitations.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="No companies invited yet"
+                body="Use the invite form to send the first invitation to this workspace."
+              />
+            </div>
+          ) : (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-muted">
+                    <th className="pb-2 pr-4">Company</th>
+                    <th className="pb-2 pr-4">Role</th>
+                    <th className="pb-2 pr-4">Work package</th>
+                    <th className="pb-2 pr-4">Status</th>
+                    <th className="pb-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {invitations.map((inv) => (
+                    <tr key={inv.id}>
+                      <td className="py-3 pr-4">
+                        <p className="font-semibold text-ink">
+                          {inv.companyName ?? "Unnamed company"}
+                        </p>
+                        <p className="text-xs text-muted">{inv.email}</p>
+                      </td>
+                      <td className="py-3 pr-4 text-muted">
+                        {PARTICIPANT_ROLE_LABELS[inv.participantRole]}
+                      </td>
+                      <td className="py-3 pr-4 text-muted">
+                        {inv.workPackage ?? "—"}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <Badge tone={INVITATION_BADGE_TONES[inv.status]}>
+                          {INVITATION_STATUS_LABELS[inv.status]}
+                        </Badge>
+                      </td>
+                      <td className="py-3 text-right">
+                        {inv.status === "joined" ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={async () => {
+                              const r = await verifyParticipant({ data: { workspaceId: workspace.id,
+                                invitationId: inv.id, } });
+                              if (r.ok) {
+                                await onChanged(`${inv.email} verified ✓`);
+                              } else {
+                                await onChanged(r.error);
+                              }
+                            }}
+                          >
+                            Verify
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            {inv.respondedAt
+                              ? new Date(inv.respondedAt).toLocaleDateString()
+                              : "Awaiting response"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div>
+        <InviteForm
+          workspaceId={workspace.id}
+          packages={packages}
+          onInvited={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function InviteForm({
+  workspaceId,
+  packages,
+  onInvited,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  onInvited: (message: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [participantRole, setParticipantRole] = useState<ParticipantRole>("subcontractor");
+  const [workPackage, setWorkPackage] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await inviteCompany({ data: { workspaceId,
+      input: {
+        email,
+        companyName,
+        participantRole,
+        workPackage,
+      }, } });
+    setPending(false);
+    if (result.ok) {
+      setEmail("");
+      setCompanyName("");
+      setWorkPackage("");
+      await onInvited(`Invitation sent to ${email} ✓`);
+    } else {
+      setError(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Invite a company</h2>
+      <p className="mt-1 text-sm text-muted">
+        Send an invitation by email. The company sees it when someone signs up
+        with that address.
+      </p>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Email" htmlFor="inv-email">
+          <Input
+            id="inv-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="bids@company.com"
+            required
+          />
+        </Field>
+        <Field label="Company name (optional)" htmlFor="inv-company">
+          <Input
+            id="inv-company"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Meridian HVAC Ltd."
+          />
+        </Field>
+        <Field label="Role in the workspace" htmlFor="inv-role">
+          <Select
+            id="inv-role"
+            value={participantRole}
+            onChange={(e) => setParticipantRole(e.target.value as ParticipantRole)}
+          >
+            {PARTICIPANT_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {PARTICIPANT_ROLE_LABELS[r]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Work package (optional)" htmlFor="inv-pkg">
+          <Select
+            id="inv-pkg"
+            value={workPackage}
+            onChange={(e) => setWorkPackage(e.target.value)}
+          >
+            <option value="">No specific package</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Sending…" : "Send invitation"}
+        </Button>
+        <p className="text-xs text-muted">
+          Limited to 10 invitations per minute per account.
+        </p>
+      </form>
+    </Card>
+  );
+}
+
+// --------------------------------------------------------------- scope tab
+function PackagesTab({
+  workspace,
+  packages,
+  isLead,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  packages: PublicWorkPackage[];
+  isLead: boolean;
+  onChanged: (message: string) => Promise<void>;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-4 lg:col-span-2">
+        {packages.length === 0 ? (
+          <EmptyState
+            title="No work packages defined yet"
+            body={
+              isLead
+                ? "Break the contract scope into packages — HVAC, cleaning, security — so companies know exactly what they're invited into."
+                : "The lead contractor hasn't defined work packages yet."
+            }
+          />
+        ) : (
+          packages.map((p) => (
+            <Card key={p.id} className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold text-navy">{p.name}</h3>
+                    {p.category && <Badge tone="blue">{p.category}</Badge>}
+                  </div>
+                  {p.description && (
+                    <p className="mt-1 text-sm text-muted">{p.description}</p>
+                  )}
+                  {p.scopeNotes && (
+                    <p className="mt-2 rounded-lg bg-mist px-3 py-2 text-xs leading-relaxed text-muted">
+                      <span className="font-semibold text-ink">Scope notes: </span>
+                      {p.scopeNotes}
+                    </p>
+                  )}
+                </div>
+                {isLead && (
+                  <ConfirmButton
+                    label="Delete"
+                    confirmLabel="Delete package?"
+                    variant="outline"
+                    size="sm"
+                    className="border-danger/40 text-danger hover:border-danger hover:text-danger"
+                    onConfirm={async () => {
+                      const r = await deleteWorkPackage({ data: { workspaceId: workspace.id,
+                        packageId: p.id, } });
+                      if (r.ok) {
+                        await onChanged(`“${p.name}” deleted.`);
+                      } else {
+                        await onChanged(r.error);
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+      {isLead && (
+        <div>
+          <NewPackageForm workspaceId={workspace.id} onCreated={async (msg) => onChanged(msg)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewPackageForm({
+  workspaceId,
+  onCreated,
+}: {
+  workspaceId: string;
+  onCreated: (message: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [scopeNotes, setScopeNotes] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await createWorkPackage({ data: { workspaceId,
+      input: { name, description, scopeNotes, category }, } });
+    setPending(false);
+    if (result.ok) {
+      setName("");
+      setCategory("");
+      setDescription("");
+      setScopeNotes("");
+      await onCreated(`Work package “${name}” created ✓`);
+    } else {
+      setError(result.error);
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">New work package</h2>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Name" htmlFor="pkg-name">
+          <Input
+            id="pkg-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="HVAC — servicing & repairs"
+            required
+            maxLength={160}
+          />
+        </Field>
+        <Field label="Category" htmlFor="pkg-cat">
+          <Input
+            id="pkg-cat"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="HVAC"
+            maxLength={100}
+          />
+        </Field>
+        <Field label="Description" htmlFor="pkg-desc">
+          <Textarea
+            id="pkg-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What does this package cover?"
+            rows={2}
+            maxLength={2000}
+          />
+        </Field>
+        <Field label="Scope notes" htmlFor="pkg-scope">
+          <Textarea
+            id="pkg-scope"
+            value={scopeNotes}
+            onChange={(e) => setScopeNotes(e.target.value)}
+            placeholder="Deliverables, SLAs, exclusions…"
+            rows={3}
+            maxLength={4000}
+          />
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Creating…" : "Add work package"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+const AUDIT_LABELS: Record<string, string> = {
+  "workspace.create": "Workspace created",
+  "workspace.update": "Workspace updated",
+  "work_package.create": "Work package created",
+  "work_package.delete": "Work package deleted",
+  "invitation.send": "Invitation sent",
+  "invitation.accept": "Invitation accepted",
+  "invitation.decline": "Invitation declined",
+  "invitation.verify": "Participant verified",
+  "demo.seed": "Demo data seeded",
+};

@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/*
+ * ScaleBridge design system
+ * Palette (from the ScaleBridge brief):
+ *   navy   #0B1F3A  primary navy        (headings, dark sections, brand surface)
+ *   brand  #1769AA  primary blue        (primary buttons, links)
+ *   teal   #16A6A0  signal teal         (accents, active states)
+ *   mist   #F7F9FC  light background    (alternating section backgrounds)
+ *   white  #FFFFFF  pure white          (cards, page background)
+ *   muted  #526173  slate               (secondary text)
+ *   ink    #17202A  charcoal            (body text)
+ *   amber  #F2A900  (warning/pending status)
+ *   success #198754 (verified/success status)
+ *   danger #C83E4D  (error/declined status)
+ */
+@theme {
+  --color-navy: #0b1f3a;
+  --color-brand: #1769aa;
+  --color-teal: #16a6a0;
+  --color-mist: #f7f9fc;
+  --color-ink: #17202a;
+  --color-muted: #526173;
+  --color-amber: #f2a900;
+  --color-success: #198754;
+  --color-danger: #c83e4d;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui,
+    sans-serif;
+
+  --shadow-card: 0 1px 2px rgb(11 31 58 / 0.06), 0 4px 16px rgb(11 31 58 / 0.06);
+  --shadow-card-hover: 0 2px 4px rgb(11 31 58 / 0.08),
+    0 12px 32px rgb(11 31 58 / 0.1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-white text-ink antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight text-navy;
+  }
+}
+
+@layer utilities {
+  .container-site {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+}

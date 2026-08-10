@@ -20,6 +20,31 @@
 
 export const ROLES_CHECK = "('sb_admin','lead_contractor','company_user','buyer','project_user','guest')";
 
+// ------------------------------------------------------------------
+// Portal-phase policy helpers. These are SQL *string fragments* used to build
+// the portal policy statements below with the exact same
+// current_setting('app.user_id') / current_setting('app.role') expressions the
+// workspace policies above use, so the portal tables test identity and role
+// identically. The fragments only ever subquery tables whose own policies are
+// self-contained (client_org_members, contract_clients, support_cases,
+// invitations, companies) or the RLS-free users table — never a table whose
+// policy could point back, so the policy graph stays acyclic.
+const UID = "nullif(current_setting('app.user_id', true), '')::uuid";
+const ROLE = "nullif(current_setting('app.role', true), '')";
+const IS_ADMIN = `${ROLE} = 'sb_admin'`;
+
+/** Caller is a member of <t>.client_org_id (optionally limited to roles). */
+const clientMember = (t: string, roles?: string) =>
+  `exists (select 1 from client_org_members m where m.org_id = ${t}.client_org_id and m.user_id = ${UID}${roles ? ` and m.role in (${roles})` : ""})`;
+
+/** Caller was invited into (or is a participant of) <t>'s workspace. */
+const participantIn = (t: string) =>
+  `exists (select 1 from invitations i where i.workspace_id = ${t}.workspace_id and i.status in ('invited','joined','verified') and lower(i.email) = (select lower(u.email) from users u where u.id = ${UID}))`;
+
+/** <t>'s client_org_id is actually linked to <t>'s workspace (contract_clients). */
+const clientLinked = (t: string) =>
+  `exists (select 1 from contract_clients cc where cc.contract_workspaces_id = ${t}.workspace_id and cc.client_org_id = ${t}.client_org_id)`;
+
 export const SCHEMA_SQL: string[] = [
   // ------------------------------------------------------------------
   // Tables
@@ -156,6 +181,218 @@ export const SCHEMA_SQL: string[] = [
   )`,
 
   // ------------------------------------------------------------------
+  // Portal tables (Admin + Client portals). Every workspace-scoped row
+  // denormalizes lead_contractor_id (workspace owner) and client_org_id (the
+  // linked buying org) so RLS policies never need to subquery
+  // contract_workspaces or contract_clients (see the invitations
+  // lead_contractor_id comment above). The server sets both columns from the
+  // workspace + its client link on insert.
+  // ------------------------------------------------------------------
+
+  // A ScaleBridge staff member can hold several admin roles (one row each).
+  // app.role='sb_admin' (profiles.role) remains the RLS gate; this table is
+  // the finer-grained staff role for the Admin Portal UI.
+  `create table if not exists admin_roles (
+    user_id uuid not null references users(id) on delete cascade,
+    role text not null
+      check (role in ('super_admin','operations','compliance','finance','support','read_only')),
+    created_at timestamptz not null default now(),
+    primary key (user_id, role)
+  )`,
+
+  // A buying organisation on the platform. Linked to contract workspaces via
+  // contract_clients; the people who act for the org are client_org_members.
+  `create table if not exists client_organizations (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    registration_number text,
+    registration_country text,
+    tax_id text,
+    address text,
+    contact_email text,
+    contact_phone text,
+    status text not null default 'draft'
+      check (status in ('draft','registered','under_review','verified','suspended','archived')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  `create table if not exists client_org_members (
+    org_id uuid not null references client_organizations(id) on delete cascade,
+    user_id uuid not null references users(id) on delete cascade,
+    role text not null
+      check (role in ('client_admin','client_pm','client_finance','client_reviewer','client_read_only')),
+    created_at timestamptz not null default now(),
+    primary key (org_id, user_id)
+  )`,
+
+  // Links a contract workspace to the buying organisation. lead_contractor_id
+  // is denormalized (same rationale as invitations.lead_contractor_id) so the
+  // workspace lead can manage the link without subquerying contract_workspaces.
+  `create table if not exists contract_clients (
+    contract_workspaces_id uuid not null references contract_workspaces(id) on delete cascade,
+    client_org_id uuid not null references client_organizations(id) on delete cascade,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    created_at timestamptz not null default now(),
+    primary key (contract_workspaces_id, client_org_id)
+  )`,
+
+  // Support / dispute case. internal_notes are admin-only; case_messages carry
+  // the participant-facing communication history (internal=true rows are
+  // admin-only notes).
+  `create table if not exists support_cases (
+    id uuid primary key default gen_random_uuid(),
+    case_number text not null unique,
+    reporter_user_id uuid not null references users(id) on delete cascade,
+    company_id uuid references companies(id) on delete set null,
+    workspace_id uuid references contract_workspaces(id) on delete set null,
+    category text not null,
+    description text,
+    attachments jsonb not null default '[]'::jsonb,
+    priority text not null default 'medium'
+      check (priority in ('low','medium','high','urgent')),
+    assignee_user_id uuid references users(id) on delete set null,
+    status text not null default 'new'
+      check (status in ('new','under_review','waiting_info','escalated','resolved','closed')),
+    internal_notes jsonb not null default '[]'::jsonb,
+    resolution text,
+    closed_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  `create table if not exists case_messages (
+    id uuid primary key default gen_random_uuid(),
+    case_id uuid not null references support_cases(id) on delete cascade,
+    author_user_id uuid not null references users(id) on delete cascade,
+    body text not null,
+    internal boolean not null default false,
+    created_at timestamptz not null default now()
+  )`,
+
+  // Delivery tracking shared by both portals. lead_contractor_id / client_org_id
+  // are denormalized so policies grant lead/client access without subquerying
+  // contract_workspaces or contract_clients; the server sets them from the
+  // workspace + its client link on insert.
+  `create table if not exists milestones (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    work_package_id uuid references work_packages(id) on delete set null,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    name text not null,
+    description text,
+    responsible_company_id uuid references companies(id) on delete set null,
+    due_date date,
+    completed_at timestamptz,
+    status text not null default 'upcoming'
+      check (status in ('upcoming','in_progress','submitted_for_review','approved','rejected','requires_clarification','delayed','completed')),
+    approval_history jsonb not null default '[]'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  `create table if not exists issues (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    work_package_id uuid references work_packages(id) on delete set null,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    title text not null,
+    description text,
+    category text,
+    severity text check (severity in ('low','medium','high','critical')),
+    responsible_party text,
+    status text not null default 'open'
+      check (status in ('open','under_review','action_required','waiting_client','waiting_contractor','resolved','closed')),
+    proposed_resolution text,
+    documents jsonb not null default '[]'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  `create table if not exists variations (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    title text not null,
+    reason text,
+    description text,
+    cost_impact numeric(14,2),
+    time_impact text,
+    documents jsonb not null default '[]'::jsonb,
+    status text not null default 'draft'
+      check (status in ('draft','submitted','under_client_review','clarification_requested','approved','rejected','approved_with_conditions','implemented')),
+    recommended_decision text,
+    submitted_by uuid references users(id) on delete set null,
+    submitted_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  // company_id is the billing company (e.g. the participant who issued the
+  // invoice) — it backs the "own invoices" participant visibility rule.
+  `create table if not exists invoices (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    work_package_id uuid references work_packages(id) on delete set null,
+    milestone_id uuid references milestones(id) on delete set null,
+    company_id uuid references companies(id) on delete set null,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    invoice_number text not null unique,
+    title text,
+    amount numeric(14,2) not null default 0,
+    status text not null default 'draft'
+      check (status in ('draft','submitted','under_review','approved','rejected','correction_required','scheduled_for_payment','paid','overdue','cancelled')),
+    documents jsonb not null default '[]'::jsonb,
+    submitted_by uuid references users(id) on delete set null,
+    submitted_at timestamptz,
+    payment_recorded_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
+  `create table if not exists progress_reports (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    reporting_period text,
+    overall_progress numeric(5,2),
+    work_package_progress jsonb not null default '{}'::jsonb,
+    completed_activities text,
+    upcoming_activities text,
+    delays text,
+    risks text,
+    issues_requiring_client text,
+    documents jsonb not null default '[]'::jsonb,
+    status text not null default 'submitted'
+      check (status in ('submitted','acknowledged','approved','clarification_requested')),
+    submitted_by uuid references users(id) on delete set null,
+    submitted_at timestamptz,
+    created_at timestamptz not null default now()
+  )`,
+
+  // visibility: workspace = shared inside the contract workspace; client_visible
+  // = additionally shared with the linked client org; company_only = private.
+  `create table if not exists documents (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    name text not null,
+    category text,
+    visibility text not null default 'workspace'
+      check (visibility in ('workspace','client_visible','company_only')),
+    version int not null default 1,
+    file_url text,
+    uploaded_by uuid references users(id) on delete set null,
+    uploaded_at timestamptz not null default now()
+  )`,
+
+  // ------------------------------------------------------------------
   // Indexes
   // ------------------------------------------------------------------
   `create index if not exists sessions_token_hash_idx on sessions (token_hash)`,
@@ -169,6 +406,42 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists notifications_user_id_idx on notifications (user_id, created_at desc)`,
   `create index if not exists audit_logs_workspace_id_idx on audit_logs (workspace_id)`,
   `create index if not exists audit_logs_actor_id_idx on audit_logs (actor_id)`,
+  `create index if not exists admin_roles_user_id_idx on admin_roles (user_id)`,
+  `create index if not exists client_organizations_status_idx on client_organizations (status)`,
+  `create index if not exists client_org_members_user_id_idx on client_org_members (user_id)`,
+  `create index if not exists contract_clients_workspace_idx on contract_clients (contract_workspaces_id)`,
+  `create index if not exists contract_clients_client_org_idx on contract_clients (client_org_id)`,
+  `create index if not exists contract_clients_lead_idx on contract_clients (lead_contractor_id)`,
+  `create index if not exists support_cases_status_idx on support_cases (status)`,
+  `create index if not exists support_cases_reporter_idx on support_cases (reporter_user_id)`,
+  `create index if not exists support_cases_assignee_idx on support_cases (assignee_user_id)`,
+  `create index if not exists support_cases_workspace_idx on support_cases (workspace_id)`,
+  `create index if not exists case_messages_case_id_idx on case_messages (case_id)`,
+  `create index if not exists milestones_workspace_id_idx on milestones (workspace_id)`,
+  `create index if not exists milestones_work_package_id_idx on milestones (work_package_id)`,
+  `create index if not exists milestones_lead_idx on milestones (lead_contractor_id)`,
+  `create index if not exists milestones_client_org_idx on milestones (client_org_id)`,
+  `create index if not exists milestones_status_idx on milestones (status)`,
+  `create index if not exists issues_workspace_id_idx on issues (workspace_id)`,
+  `create index if not exists issues_status_idx on issues (status)`,
+  `create index if not exists issues_lead_idx on issues (lead_contractor_id)`,
+  `create index if not exists issues_client_org_idx on issues (client_org_id)`,
+  `create index if not exists variations_workspace_id_idx on variations (workspace_id)`,
+  `create index if not exists variations_status_idx on variations (status)`,
+  `create index if not exists variations_lead_idx on variations (lead_contractor_id)`,
+  `create index if not exists variations_client_org_idx on variations (client_org_id)`,
+  `create index if not exists invoices_workspace_id_idx on invoices (workspace_id)`,
+  `create index if not exists invoices_milestone_id_idx on invoices (milestone_id)`,
+  `create index if not exists invoices_status_idx on invoices (status)`,
+  `create index if not exists invoices_lead_idx on invoices (lead_contractor_id)`,
+  `create index if not exists invoices_client_org_idx on invoices (client_org_id)`,
+  `create index if not exists progress_reports_workspace_id_idx on progress_reports (workspace_id)`,
+  `create index if not exists progress_reports_lead_idx on progress_reports (lead_contractor_id)`,
+  `create index if not exists progress_reports_client_org_idx on progress_reports (client_org_id)`,
+  `create index if not exists documents_workspace_id_idx on documents (workspace_id)`,
+  `create index if not exists documents_visibility_idx on documents (visibility)`,
+  `create index if not exists documents_lead_idx on documents (lead_contractor_id)`,
+  `create index if not exists documents_client_org_idx on documents (client_org_id)`,
 
   // ------------------------------------------------------------------
   // Row Level Security
@@ -196,6 +469,30 @@ export const SCHEMA_SQL: string[] = [
   `alter table invitations force row level security`,
   `alter table notifications force row level security`,
   `alter table audit_logs force row level security`,
+  `alter table admin_roles enable row level security`,
+  `alter table client_organizations enable row level security`,
+  `alter table client_org_members enable row level security`,
+  `alter table contract_clients enable row level security`,
+  `alter table support_cases enable row level security`,
+  `alter table case_messages enable row level security`,
+  `alter table milestones enable row level security`,
+  `alter table issues enable row level security`,
+  `alter table variations enable row level security`,
+  `alter table invoices enable row level security`,
+  `alter table progress_reports enable row level security`,
+  `alter table documents enable row level security`,
+  `alter table admin_roles force row level security`,
+  `alter table client_organizations force row level security`,
+  `alter table client_org_members force row level security`,
+  `alter table contract_clients force row level security`,
+  `alter table support_cases force row level security`,
+  `alter table case_messages force row level security`,
+  `alter table milestones force row level security`,
+  `alter table issues force row level security`,
+  `alter table variations force row level security`,
+  `alter table invoices force row level security`,
+  `alter table progress_reports force row level security`,
+  `alter table documents force row level security`,
 
   // --- profiles: users manage their own profile; sb_admin manages all ----
   `drop policy if exists profiles_select on profiles`,
@@ -470,5 +767,342 @@ export const SCHEMA_SQL: string[] = [
       )
     )
     or audit_logs.actor_id = nullif(current_setting('app.user_id', true), '')::uuid
+  )`,
+
+  // ------------------------------------------------------------------
+  // Portal-phase policies (Admin + Client portals).
+  //
+  // Same acyclicity discipline as invitations: every policy that needs a
+  // workspace or client lookup uses a column denormalized onto the row
+  // (lead_contractor_id, client_org_id) instead of subquerying
+  // contract_workspaces / contract_clients. The only RLS tables subqueried
+  // from these policies are client_org_members, contract_clients,
+  // support_cases, invitations and companies — whose own policies reference
+  // only their own columns and users, so the policy graph has no cycles
+  // (verified against the live DB: self-references and mutual references are
+  // rejected with "infinite recursion detected in policy", 1-hop chains are
+  // fine). users/sessions remain the only RLS-free tables.
+  // ------------------------------------------------------------------
+
+  // --- admin_roles: sb_admin manages staff roles; a user can read their own.
+  `drop policy if exists admin_roles_select on admin_roles`,
+  `create policy admin_roles_select on admin_roles for select using (
+    ${IS_ADMIN} or admin_roles.user_id = ${UID}
+  )`,
+  `drop policy if exists admin_roles_insert on admin_roles`,
+  `create policy admin_roles_insert on admin_roles for insert with check (${IS_ADMIN})`,
+  `drop policy if exists admin_roles_update on admin_roles`,
+  `create policy admin_roles_update on admin_roles for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists admin_roles_delete on admin_roles`,
+  `create policy admin_roles_delete on admin_roles for delete using (${IS_ADMIN})`,
+
+  // --- client_organizations: visible to sb_admin and the org's members
+  // (membership comes from client_org_members, whose own policies never point
+  // back here); created/maintained by sb_admin.
+  `drop policy if exists client_organizations_select on client_organizations`,
+  `create policy client_organizations_select on client_organizations for select using (
+    ${IS_ADMIN}
+    or exists (select 1 from client_org_members m where m.org_id = client_organizations.id and m.user_id = ${UID})
+  )`,
+  `drop policy if exists client_organizations_insert on client_organizations`,
+  `create policy client_organizations_insert on client_organizations for insert with check (${IS_ADMIN})`,
+  `drop policy if exists client_organizations_update on client_organizations`,
+  `create policy client_organizations_update on client_organizations for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists client_organizations_delete on client_organizations`,
+  `create policy client_organizations_delete on client_organizations for delete using (${IS_ADMIN})`,
+
+  // --- client_org_members: users see their own membership; sb_admin manages
+  // all; the lead contractor of a contract that links this org may also add /
+  // update / remove members (the client-onboarding path) via the denormalized
+  // contract_clients.lead_contractor_id. A self-referential roster check would
+  // recurse, so "manage the team" is scoped to the lead/admin until a dedicated
+  // grant table is introduced with the Team UI.
+  `drop policy if exists client_org_members_select on client_org_members`,
+  `create policy client_org_members_select on client_org_members for select using (
+    ${IS_ADMIN} or client_org_members.user_id = ${UID}
+  )`,
+  `drop policy if exists client_org_members_insert on client_org_members`,
+  `create policy client_org_members_insert on client_org_members for insert with check (
+    ${IS_ADMIN}
+    or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
+  )`,
+  `drop policy if exists client_org_members_update on client_org_members`,
+  `create policy client_org_members_update on client_org_members for update using (
+    ${IS_ADMIN}
+    or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
+  ) with check (
+    ${IS_ADMIN}
+    or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
+  )`,
+  `drop policy if exists client_org_members_delete on client_org_members`,
+  `create policy client_org_members_delete on client_org_members for delete using (
+    ${IS_ADMIN}
+    or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
+  )`,
+
+  // --- contract_clients: the workspace lead manages the client link (via the
+  // denormalized lead_contractor_id); client-org members see the contracts
+  // their org is client on; sb_admin sees all.
+  `drop policy if exists contract_clients_select on contract_clients`,
+  `create policy contract_clients_select on contract_clients for select using (
+    ${IS_ADMIN}
+    or contract_clients.lead_contractor_id = ${UID}
+    or exists (select 1 from client_org_members m where m.org_id = contract_clients.client_org_id and m.user_id = ${UID})
+  )`,
+  `drop policy if exists contract_clients_insert on contract_clients`,
+  `create policy contract_clients_insert on contract_clients for insert with check (
+    ${IS_ADMIN} or contract_clients.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists contract_clients_update on contract_clients`,
+  `create policy contract_clients_update on contract_clients for update using (
+    ${IS_ADMIN} or contract_clients.lead_contractor_id = ${UID}
+  ) with check (
+    ${IS_ADMIN} or contract_clients.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists contract_clients_delete on contract_clients`,
+  `create policy contract_clients_delete on contract_clients for delete using (
+    ${IS_ADMIN} or contract_clients.lead_contractor_id = ${UID}
+  )`,
+
+  // --- support_cases: reporter (any authenticated user) can open a case and
+  // follow it; the assigned admin and sb_admin handle it. Case communication
+  // lives in case_messages.
+  `drop policy if exists support_cases_select on support_cases`,
+  `create policy support_cases_select on support_cases for select using (
+    ${IS_ADMIN}
+    or support_cases.reporter_user_id = ${UID}
+    or support_cases.assignee_user_id = ${UID}
+  )`,
+  `drop policy if exists support_cases_insert on support_cases`,
+  `create policy support_cases_insert on support_cases for insert with check (
+    ${IS_ADMIN} or support_cases.reporter_user_id = ${UID}
+  )`,
+  `drop policy if exists support_cases_update on support_cases`,
+  `create policy support_cases_update on support_cases for update using (
+    ${IS_ADMIN} or support_cases.assignee_user_id = ${UID}
+  ) with check (
+    ${IS_ADMIN} or support_cases.assignee_user_id = ${UID}
+  )`,
+  `drop policy if exists support_cases_delete on support_cases`,
+  `create policy support_cases_delete on support_cases for delete using (${IS_ADMIN})`,
+
+  // --- case_messages: admins see all (including internal notes); participants
+  // of the case (reporter/assignee) see only non-internal messages and may add
+  // non-internal ones; the author always sees their own.
+  `drop policy if exists case_messages_select on case_messages`,
+  `create policy case_messages_select on case_messages for select using (
+    ${IS_ADMIN}
+    or case_messages.author_user_id = ${UID}
+    or (
+      case_messages.internal = false
+      and exists (
+        select 1 from support_cases sc
+        where sc.id = case_messages.case_id
+          and (sc.reporter_user_id = ${UID} or sc.assignee_user_id = ${UID})
+      )
+    )
+  )`,
+  `drop policy if exists case_messages_insert on case_messages`,
+  `create policy case_messages_insert on case_messages for insert with check (
+    ${IS_ADMIN}
+    or (
+      case_messages.internal = false
+      and exists (
+        select 1 from support_cases sc
+        where sc.id = case_messages.case_id
+          and (sc.reporter_user_id = ${UID} or sc.assignee_user_id = ${UID})
+      )
+    )
+  )`,
+  `drop policy if exists case_messages_update on case_messages`,
+  `create policy case_messages_update on case_messages for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists case_messages_delete on case_messages`,
+  `create policy case_messages_delete on case_messages for delete using (${IS_ADMIN})`,
+
+  // --- milestones: lead (CRUD), client members read + approve
+  // (client_admin / client_pm / client_reviewer update; client_org pinned to a
+  // live contract_clients link), participants of the workspace read, sb_admin
+  // all.
+  `drop policy if exists milestones_select on milestones`,
+  `create policy milestones_select on milestones for select using (
+    ${IS_ADMIN}
+    or milestones.lead_contractor_id = ${UID}
+    or ${clientMember("milestones")}
+    or ${participantIn("milestones")}
+  )`,
+  `drop policy if exists milestones_insert on milestones`,
+  `create policy milestones_insert on milestones for insert with check (
+    ${IS_ADMIN} or milestones.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists milestones_update on milestones`,
+  `create policy milestones_update on milestones for update using (
+    ${IS_ADMIN}
+    or milestones.lead_contractor_id = ${UID}
+    or ${clientMember("milestones", "'client_admin','client_pm','client_reviewer'")}
+  ) with check (
+    ${IS_ADMIN}
+    or milestones.lead_contractor_id = ${UID}
+    or (${clientMember("milestones", "'client_admin','client_pm','client_reviewer'")} and ${clientLinked("milestones")})
+  )`,
+  `drop policy if exists milestones_delete on milestones`,
+  `create policy milestones_delete on milestones for delete using (
+    ${IS_ADMIN} or milestones.lead_contractor_id = ${UID}
+  )`,
+
+  // --- issues: lead (CRUD); clients may raise issues (client_admin /
+  // client_pm, against a linked org) and update them; participants of the
+  // workspace read (they resolve "waiting_contractor" items); sb_admin all.
+  `drop policy if exists issues_select on issues`,
+  `create policy issues_select on issues for select using (
+    ${IS_ADMIN}
+    or issues.lead_contractor_id = ${UID}
+    or ${clientMember("issues")}
+    or ${participantIn("issues")}
+  )`,
+  `drop policy if exists issues_insert on issues`,
+  `create policy issues_insert on issues for insert with check (
+    ${IS_ADMIN}
+    or issues.lead_contractor_id = ${UID}
+    or (${clientMember("issues", "'client_admin','client_pm'")} and ${clientLinked("issues")})
+  )`,
+  `drop policy if exists issues_update on issues`,
+  `create policy issues_update on issues for update using (
+    ${IS_ADMIN}
+    or issues.lead_contractor_id = ${UID}
+    or ${clientMember("issues", "'client_admin','client_pm'")}
+  ) with check (
+    ${IS_ADMIN}
+    or issues.lead_contractor_id = ${UID}
+    or (${clientMember("issues", "'client_admin','client_pm'")} and ${clientLinked("issues")})
+  )`,
+  `drop policy if exists issues_delete on issues`,
+  `create policy issues_delete on issues for delete using (
+    ${IS_ADMIN} or issues.lead_contractor_id = ${UID}
+  )`,
+
+  // --- variations: lead submits/manages; client reviews and decides
+  // (client_admin / client_pm). Commercial data — participants get NO access.
+  `drop policy if exists variations_select on variations`,
+  `create policy variations_select on variations for select using (
+    ${IS_ADMIN}
+    or variations.lead_contractor_id = ${UID}
+    or ${clientMember("variations")}
+  )`,
+  `drop policy if exists variations_insert on variations`,
+  `create policy variations_insert on variations for insert with check (
+    ${IS_ADMIN} or variations.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists variations_update on variations`,
+  `create policy variations_update on variations for update using (
+    ${IS_ADMIN}
+    or variations.lead_contractor_id = ${UID}
+    or ${clientMember("variations", "'client_admin','client_pm'")}
+  ) with check (
+    ${IS_ADMIN}
+    or variations.lead_contractor_id = ${UID}
+    or (${clientMember("variations", "'client_admin','client_pm'")} and ${clientLinked("variations")})
+  )`,
+  `drop policy if exists variations_delete on variations`,
+  `create policy variations_delete on variations for delete using (
+    ${IS_ADMIN} or variations.lead_contractor_id = ${UID}
+  )`,
+
+  // --- invoices: lead (CRUD); client finance reviews/approves/pays
+  // (client_admin / client_finance); a participant sees only invoices issued
+  // by their own company (invoices.company_id -> companies.owner_id); sb_admin
+  // all.
+  `drop policy if exists invoices_select on invoices`,
+  `create policy invoices_select on invoices for select using (
+    ${IS_ADMIN}
+    or invoices.lead_contractor_id = ${UID}
+    or ${clientMember("invoices")}
+    or (
+      invoices.company_id is not null
+      and exists (select 1 from companies c where c.id = invoices.company_id and c.owner_id = ${UID})
+    )
+  )`,
+  `drop policy if exists invoices_insert on invoices`,
+  `create policy invoices_insert on invoices for insert with check (
+    ${IS_ADMIN} or invoices.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists invoices_update on invoices`,
+  `create policy invoices_update on invoices for update using (
+    ${IS_ADMIN}
+    or invoices.lead_contractor_id = ${UID}
+    or ${clientMember("invoices", "'client_admin','client_finance'")}
+  ) with check (
+    ${IS_ADMIN}
+    or invoices.lead_contractor_id = ${UID}
+    or (${clientMember("invoices", "'client_admin','client_finance'")} and ${clientLinked("invoices")})
+  )`,
+  `drop policy if exists invoices_delete on invoices`,
+  `create policy invoices_delete on invoices for delete using (
+    ${IS_ADMIN} or invoices.lead_contractor_id = ${UID}
+  )`,
+
+  // --- progress_reports: lead submits; client members review/acknowledge/
+  // approve (client_admin / client_pm / client_reviewer); participants of the
+  // workspace read; sb_admin all.
+  `drop policy if exists progress_reports_select on progress_reports`,
+  `create policy progress_reports_select on progress_reports for select using (
+    ${IS_ADMIN}
+    or progress_reports.lead_contractor_id = ${UID}
+    or ${clientMember("progress_reports")}
+    or ${participantIn("progress_reports")}
+  )`,
+  `drop policy if exists progress_reports_insert on progress_reports`,
+  `create policy progress_reports_insert on progress_reports for insert with check (
+    ${IS_ADMIN} or progress_reports.lead_contractor_id = ${UID}
+  )`,
+  `drop policy if exists progress_reports_update on progress_reports`,
+  `create policy progress_reports_update on progress_reports for update using (
+    ${IS_ADMIN}
+    or progress_reports.lead_contractor_id = ${UID}
+    or ${clientMember("progress_reports", "'client_admin','client_pm','client_reviewer'")}
+  ) with check (
+    ${IS_ADMIN}
+    or progress_reports.lead_contractor_id = ${UID}
+    or (${clientMember("progress_reports", "'client_admin','client_pm','client_reviewer'")} and ${clientLinked("progress_reports")})
+  )`,
+  `drop policy if exists progress_reports_delete on progress_reports`,
+  `create policy progress_reports_delete on progress_reports for delete using (
+    ${IS_ADMIN} or progress_reports.lead_contractor_id = ${UID}
+  )`,
+
+  // --- documents: lead (CRUD); clients see only client_visible docs and may
+  // review/approve those (client_admin / client_reviewer); participants see
+  // workspace + client_visible docs and may upload (but never mark a doc
+  // client_visible); company_only docs are lead/admin-only; sb_admin all.
+  `drop policy if exists documents_select on documents`,
+  `create policy documents_select on documents for select using (
+    ${IS_ADMIN}
+    or documents.lead_contractor_id = ${UID}
+    or (documents.visibility = 'client_visible' and ${clientMember("documents")})
+    or (documents.visibility <> 'company_only' and ${participantIn("documents")})
+  )`,
+  `drop policy if exists documents_insert on documents`,
+  `create policy documents_insert on documents for insert with check (
+    ${IS_ADMIN}
+    or documents.lead_contractor_id = ${UID}
+    or (${clientMember("documents")} and ${clientLinked("documents")})
+    or (documents.visibility <> 'client_visible' and ${participantIn("documents")})
+  )`,
+  `drop policy if exists documents_update on documents`,
+  `create policy documents_update on documents for update using (
+    ${IS_ADMIN}
+    or documents.lead_contractor_id = ${UID}
+    or (documents.visibility = 'client_visible' and ${clientMember("documents", "'client_admin','client_reviewer'")})
+  ) with check (
+    ${IS_ADMIN}
+    or documents.lead_contractor_id = ${UID}
+    or (
+      documents.visibility = 'client_visible'
+      and ${clientMember("documents", "'client_admin','client_reviewer'")}
+      and ${clientLinked("documents")}
+    )
+  )`,
+  `drop policy if exists documents_delete on documents`,
+  `create policy documents_delete on documents for delete using (
+    ${IS_ADMIN} or documents.lead_contractor_id = ${UID}
   )`,
 ];

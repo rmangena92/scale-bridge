@@ -3,7 +3,8 @@
  * logic (DB access via ~/db + asUser, rate limiting). This module is imported
  * exclusively from ./workspace.ts (server-function wrappers) whose handler
  * bodies are replaced with RPC stubs in the client build, so this module and
- * its node/neon imports never reach the browser bundle. Do not import it from
+ * its server-only imports (node:crypto, postgres.js) never reach the browser
+ * bundle. Do not import it from
  * client components.
  */
 import { randomUUID } from "node:crypto";

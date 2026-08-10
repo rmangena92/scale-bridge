@@ -6,18 +6,18 @@ role-based access control real, not cosmetic.
 
 ## The stack
 
-- Postgres (Neon) via the sandbox helper `import { sql } from "~/db"` — server
-  only, never import `~/db` from client components.
+- Postgres (Supabase) via the postgres.js pool `import { sql } from "~/db"` —
+  server only, never import `~/db` from client components.
 - `src/lib/db.ts` adds two transaction scopes on top of `sql()`:
-  - `asService(build)` — a single neon batched transaction with **no** RLS
+  - `asService(build)` — a single postgres.js transaction with **no** RLS
     context. Only for auth-internal tables (`users`, `sessions`) and bootstrap
     reads keyed on an already-validated session token.
-  - `asUser(userId, role, build)` — a single neon batched transaction whose
+  - `asUser(userId, role, build)` — a single postgres.js transaction whose
     first query is
     `select set_config('app.user_id', $1, true), set_config('app.role', $2, true)`
     followed by your queries. RLS policies on the business tables see the
     acting user; `true` makes the settings **transaction-local**, so they can
-    never leak across Neon's connection pool into another request.
+    never leak across the postgres.js connection pool into another request.
 
 ## The rule
 
@@ -39,8 +39,8 @@ rows and writes fail. That is intentional (safe default), not a bug.
   code.
 - **No client DB access.** The browser only ever talks to server functions,
   so `app.user_id` is set exclusively by trusted server code.
-- **Pool-safe.** `set_config(..., true)` (transaction-local) + a batched
-  neon transaction means each request is atomic and settings never persist
+- **Pool-safe.** `set_config(..., true)` (transaction-local) + a postgres.js
+  transaction means each request is atomic and settings never persist
   on a reused connection.
 
 ## The tables
@@ -98,10 +98,10 @@ await asUser(user.id, user.role, (tx) => [
 ```
 
 Notes:
-- neon's `transaction()` batches queries as one non-interactive transaction —
-  queries in one batch cannot use each other's *results* (only `set_config`
-  state). Split into two batches when you need a value from an earlier query
-  (see `saveCompany` in `src/lib/company.ts` for the pattern).
+- postgres.js `begin()` runs the queries as one transaction — queries in one
+  batch cannot use each other's *results* (only `set_config` state). Split into
+  two batches when you need a value from an earlier query (see `saveCompany` in
+  `src/lib/company.ts` for the pattern).
 - Always append an `auditQuery(...)` to state-changing batches.
 - Coerce non-primitive columns (timestamps are JS `Date`s) to strings before
   returning them to the client.

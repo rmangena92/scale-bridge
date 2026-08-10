@@ -4,7 +4,8 @@
  * This module is imported exclusively from server-function modules
  * (./auth.ts, ./company.ts) whose handlers run only on the server; the client
  * build replaces those handlers with RPC stubs, so this module and its
- * node/neon imports never reach the browser bundle. Do not import this module
+ * server-only imports (node:crypto, postgres.js) never reach the browser
+ * bundle. Do not import this module
  * from client components.
  */
 import {

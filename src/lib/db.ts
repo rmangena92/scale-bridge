@@ -1,12 +1,14 @@
 /**
  * Server-only database access layer.
  *
- * SECURITY: Neon’s neondb_owner role has rolbypassrls=true, so RLS is not
- * enforceable for this application. Explicit app-layer SQL predicates are the
- * security boundary; FORCE RLS remains enabled as defense-in-depth.
+ * SECURITY: RLS IS NOW ENFORCED. The app connects as the `scalebridge_app`
+ * role, which has rolbypassrls=false, and every business table has
+ * FORCE ROW LEVEL SECURITY enabled — so even the table owner (this role) is
+ * subject to the policies. Explicit app-layer SQL predicates are retained as
+ * defense-in-depth.
  *
- * `sql` comes from ~/db (the sandbox's built-in neon helper). This module adds
- * two transaction scopes used by every server function:
+ * `sql` comes from ~/db (the postgres.js pool). This module adds two
+ * transaction scopes used by every server function:
  *
  *  - asService(queries):  runs queries with NO RLS context. Used only for
  *    auth-internal reads/writes on the `users` / `sessions` tables (which have
@@ -14,7 +16,7 @@
  *
  *  - asUser(userId, role, queries): prepends
  *        select set_config('app.user_id', …), set_config('app.role', …)
- *    to a single neon batched transaction, so Row Level Security policies on
+ *    to a single postgres.js transaction, so Row Level Security policies on
  *    the business tables (profiles, companies, contract_workspaces,
  *    invitations, audit_logs) see the acting user. Because the settings are
  *    transaction-local (the `true` argument), they can never leak across the
@@ -24,14 +26,16 @@
  * app.user_id context every policy denies, so reads silently return no rows.
  * Use asUser() with the session's user + role instead.
  *
- * This module imports node/neon and must only be used from server code.
+ * This module imports postgres.js and must only be used from server code.
  */
-import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
-import { sql } from "~/db";
+import type { TransactionSql } from "postgres";
+import { getPg } from "~/db";
 import { SCHEMA_SQL } from "./schema";
 
-export type Tx = NeonQueryFunctionInTransaction<false, false>;
-export type TxQuery = ReturnType<Tx>;
+/** A postgres.js transaction client (what `begin()` passes to its callback). */
+export type Tx = TransactionSql;
+/** A query issued on a transaction — a promise resolving to rows. */
+export type TxQuery = Promise<readonly unknown[]>;
 
 export const dbConfigured = (): boolean => Boolean(process.env.DATABASE_URL);
 
@@ -44,18 +48,11 @@ let schemaPromise: Promise<void> | null = null;
 export function ensureSchema(): Promise<void> {
   if (!schemaPromise) {
     schemaPromise = (async () => {
-      // NOTE: @neondatabase/serverless >= 1.0 refuses plain function calls
-      // (sql("...")) — only tagged templates or sql.query(text) are accepted.
-      // Schema statements are plain SQL strings, so route them through the
-      // transaction API's tx.query(text) form. Running every statement inside
-      // ONE non-interactive transaction is both faster (~50 HTTP round-trips
-      // collapse into one — a fresh schema apply otherwise takes minutes and
-      // blows Bun's 10s request timeout) and atomic (any failure rolls back
-      // the whole schema).
-      const db = sql();
-      await db.transaction((tx) =>
-        SCHEMA_SQL.map((stmt) => tx.query(stmt)),
-      );
+      // postgres.js unsafe() sends raw SQL via the simple query protocol, so a
+      // multi-statement string is fine. SCHEMA_SQL statements are individually
+      // idempotent (IF NOT EXISTS / DROP POLICY IF EXISTS), so re-running after
+      // a partial failure is safe.
+      await getPg().unsafe(SCHEMA_SQL.join(";\n"));
     })().catch((err) => {
       schemaPromise = null;
       throw err;
@@ -68,8 +65,7 @@ export function ensureSchema(): Promise<void> {
 export async function asService(
   build: (tx: Tx) => TxQuery[],
 ): Promise<unknown[]> {
-  const db = sql();
-  return db.transaction((tx) => build(tx));
+  return await getPg().begin(async (tx) => Promise.all(build(tx)));
 }
 
 /** Run a batch of queries as `userId`/`role`, with RLS enforced. */
@@ -78,13 +74,12 @@ export async function asUser(
   role: string,
   build: (tx: Tx) => TxQuery[],
 ): Promise<unknown[]> {
-  const db = sql();
-  return db.transaction((tx) => [
-    tx`select
+  return await getPg().begin(async (tx) => {
+    await tx`select
       set_config('app.user_id', ${userId}, true),
-      set_config('app.role', ${role}, true)`,
-    ...build(tx),
-  ]);
+      set_config('app.role', ${role}, true)`;
+    return Promise.all(build(tx));
+  });
 }
 
 /** Map a unique-constraint violation to a friendly message where relevant. */

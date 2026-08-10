@@ -75,14 +75,15 @@ export const SCHEMA_SQL: string[] = [
     id uuid primary key default gen_random_uuid(),
     workspace_id uuid not null references contract_workspaces(id) on delete cascade,
     -- Denormalized owner of the workspace this invitation belongs to. Set by
-    -- the server on insert/re-invite (always the workspace lead). Exists so the
-    -- invitations_select policy can grant the lead access WITHOUT subquerying
+    -- the server on insert/re-invite (always the workspace lead). Exists so
+    -- EVERY invitations policy can grant the lead access WITHOUT subquerying
     -- contract_workspaces — with FORCE RLS on every tenant table, a policy
     -- subquery against another FORCE'd table re-applies that table's policies,
     -- and contract_workspaces_select <-> invitations_select formed a rewrite
-    -- cycle ("infinite recursion detected in policy"). Keeping the workspace
-    -- ownership check (subquery) in invitations_insert/update/delete is safe
-    -- now that invitations_select no longer references contract_workspaces.
+    -- cycle ("infinite recursion detected in policy"). All invitations
+    -- policies therefore reference only invitations columns + the non-RLS
+    -- users table; the server keeps lead_contractor_id in sync with the
+    -- workspace's lead on every insert/re-invite (doInviteCompany/doSeedDemo).
     lead_contractor_id uuid references users(id) on delete cascade,
     company_id uuid references companies(id) on delete set null,
     company_name text,
@@ -284,30 +285,28 @@ export const SCHEMA_SQL: string[] = [
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
 
-  // --- invitations: the workspace lead sees/manages all; the invited
-  // company's members see theirs; the person invited by email sees theirs;
-  // admins see all. invitations_respond lets the invited user move an OPEN
-  // invitation to joined/declined (and only that — the new row must still
-  // carry their own email and a response status).
+  // --- invitations: the workspace lead sees/manages all; the person invited
+  // by email sees theirs; admins see all. invitations_respond lets the invited
+  // user move an OPEN invitation to joined/declined (and only that — the new
+  // row must still carry their own email and a response status).
   //
   // NOTE (RLS recursion): with FORCE RLS on every tenant table, policy
   // subqueries against another FORCE'd table re-apply that table's policies at
-  // rewrite time, so invitations_select must NOT subquery contract_workspaces
-  // (that subquery + the workspace select policy's invitations subquery formed
-  // an infinite-rewrite cycle). The lead's read access therefore uses the
-  // denormalized invitations.lead_contractor_id column, which the server sets
-  // to the workspace lead on every insert/re-invite. The write policies
-  // (insert/update/delete) keep the contract_workspaces ownership subquery —
-  // that edge is now acyclic, and it enforces lead-owns-workspace in the DB.
+  // rewrite time. That makes ANY policy subquery into an RLS table a potential
+  // cycle edge: contract_workspaces_select subqueries invitations (participant
+  // visibility), so invitations policies MUST NOT subquery contract_workspaces
+  // (or profiles, or any other RLS table) — invitations_insert/update/delete
+  // previously did, forming invitations <-> contract_workspaces and
+  // invitations -> profiles rewrite cycles ("infinite recursion detected in
+  // policy for relation invitations"). ALL invitations policies therefore
+  // reference ONLY invitations columns (the denormalized
+  // invitations.lead_contractor_id, which the server sets to the workspace
+  // lead on every insert/re-invite) and the non-RLS users table. The graph
+  // contract_workspaces -> invitations -> users is then acyclic.
   `drop policy if exists invitations_select on invitations`,
   `create policy invitations_select on invitations for select using (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
     or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    or exists (
-      select 1 from profiles p
-      where p.user_id = nullif(current_setting('app.user_id', true), '')::uuid
-        and p.company_id = invitations.company_id
-    )
     or lower(invitations.email) = (
       select lower(u.email) from users u
       where u.id = nullif(current_setting('app.user_id', true), '')::uuid
@@ -316,27 +315,15 @@ export const SCHEMA_SQL: string[] = [
   `drop policy if exists invitations_insert on invitations`,
   `create policy invitations_insert on invitations for insert with check (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
-    or exists (
-      select 1 from contract_workspaces cw
-      where cw.id = invitations.workspace_id
-        and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
+    or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
   )`,
   `drop policy if exists invitations_update on invitations`,
   `create policy invitations_update on invitations for update using (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
-    or exists (
-      select 1 from contract_workspaces cw
-      where cw.id = invitations.workspace_id
-        and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
+    or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
   ) with check (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
-    or exists (
-      select 1 from contract_workspaces cw
-      where cw.id = invitations.workspace_id
-        and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
+    or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
   )`,
   `drop policy if exists invitations_respond on invitations`,
   `create policy invitations_respond on invitations for update using (
@@ -355,11 +342,7 @@ export const SCHEMA_SQL: string[] = [
   `drop policy if exists invitations_delete on invitations`,
   `create policy invitations_delete on invitations for delete using (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
-    or exists (
-      select 1 from contract_workspaces cw
-      where cw.id = invitations.workspace_id
-        and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
+    or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
   )`,
 
   // --- work_packages: the workspace lead manages them; participants can read

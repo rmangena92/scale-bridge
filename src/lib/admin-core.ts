@@ -143,16 +143,17 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
          order by d.expiry_date asc
          limit 20`,
     ]);
+    // asUser() returns [set_config_rows, ...query_rows] — real results start at [1].
     const n = (i: number) => Number((rows[i] as { n: number }[] | undefined)?.[0]?.n ?? 0);
-    const payments = rows[9] as { total: string }[];
-    const activity = rows[10] as {
+    const payments = rows[10] as { total: string }[];
+    const activity = rows[11] as {
       id: string;
       action: string;
       details: unknown;
       created_at: string;
       actor_email: string | null;
     }[];
-    const licences = rows[11] as {
+    const licences = rows[12] as {
       id: string;
       name: string;
       category: string | null;
@@ -163,15 +164,15 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
     return {
       ok: true,
       stats: {
-        totalUsers: n(0),
-        totalCompanies: n(1),
-        companiesAwaitingVerification: n(2),
-        activeContracts: n(3),
-        contractsAwaitingResponses: n(4),
-        activeProjectWorkspaces: n(5),
-        openSupportRequests: n(6),
-        openDisputes: n(7),
-        pendingDocumentReviews: n(8),
+        totalUsers: n(1),
+        totalCompanies: n(2),
+        companiesAwaitingVerification: n(3),
+        activeContracts: n(4),
+        contractsAwaitingResponses: n(5),
+        activeProjectWorkspaces: n(6),
+        openSupportRequests: n(7),
+        openDisputes: n(8),
+        pendingDocumentReviews: n(9),
         outstandingPayments: Number(payments[0]?.total ?? 0),
         monthlyRecurringRevenue: 0, // subscriptions ship in Part B
         recentActivity: activity.map((r) => ({

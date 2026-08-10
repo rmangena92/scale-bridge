@@ -74,6 +74,16 @@ export const SCHEMA_SQL: string[] = [
   `create table if not exists invitations (
     id uuid primary key default gen_random_uuid(),
     workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    -- Denormalized owner of the workspace this invitation belongs to. Set by
+    -- the server on insert/re-invite (always the workspace lead). Exists so the
+    -- invitations_select policy can grant the lead access WITHOUT subquerying
+    -- contract_workspaces — with FORCE RLS on every tenant table, a policy
+    -- subquery against another FORCE'd table re-applies that table's policies,
+    -- and contract_workspaces_select <-> invitations_select formed a rewrite
+    -- cycle ("infinite recursion detected in policy"). Keeping the workspace
+    -- ownership check (subquery) in invitations_insert/update/delete is safe
+    -- now that invitations_select no longer references contract_workspaces.
+    lead_contractor_id uuid references users(id) on delete cascade,
     company_id uuid references companies(id) on delete set null,
     company_name text,
     email text,
@@ -90,6 +100,10 @@ export const SCHEMA_SQL: string[] = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  // Add lead_contractor_id to installations that predate it (idempotent).
+  // A one-time backfill from contract_workspaces is only needed if legacy rows
+  // exist; fresh databases have none (the server always sets it on insert).
+  `alter table invitations add column if not exists lead_contractor_id uuid references users(id) on delete cascade`,
 
   `create table if not exists work_packages (
     id uuid primary key default gen_random_uuid(),
@@ -275,14 +289,20 @@ export const SCHEMA_SQL: string[] = [
   // admins see all. invitations_respond lets the invited user move an OPEN
   // invitation to joined/declined (and only that — the new row must still
   // carry their own email and a response status).
+  //
+  // NOTE (RLS recursion): with FORCE RLS on every tenant table, policy
+  // subqueries against another FORCE'd table re-apply that table's policies at
+  // rewrite time, so invitations_select must NOT subquery contract_workspaces
+  // (that subquery + the workspace select policy's invitations subquery formed
+  // an infinite-rewrite cycle). The lead's read access therefore uses the
+  // denormalized invitations.lead_contractor_id column, which the server sets
+  // to the workspace lead on every insert/re-invite. The write policies
+  // (insert/update/delete) keep the contract_workspaces ownership subquery —
+  // that edge is now acyclic, and it enforces lead-owns-workspace in the DB.
   `drop policy if exists invitations_select on invitations`,
   `create policy invitations_select on invitations for select using (
     nullif(current_setting('app.role', true), '') = 'sb_admin'
-    or exists (
-      select 1 from contract_workspaces cw
-      where cw.id = invitations.workspace_id
-        and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
-    )
+    or invitations.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
     or exists (
       select 1 from profiles p
       where p.user_id = nullif(current_setting('app.user_id', true), '')::uuid

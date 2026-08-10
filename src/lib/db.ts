@@ -75,10 +75,14 @@ export async function asUser(
   build: (tx: Tx) => TxQuery[],
 ): Promise<unknown[]> {
   return await getPg().begin(async (tx) => {
-    await tx`select
+    // NOTE: the set_config result is included at index 0 so the returned array
+    // is [set_config_rows, ...query_rows] — every caller reads its real rows
+    // starting at [1] (the pre-postgres.js contract; do not "simplify" this).
+    const set = await tx`select
       set_config('app.user_id', ${userId}, true),
       set_config('app.role', ${role}, true)`;
-    return Promise.all(build(tx));
+    const rest = await Promise.all(build(tx));
+    return [set, ...rest];
   });
 }
 

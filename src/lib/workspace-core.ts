@@ -496,13 +496,14 @@ export async function doInviteCompany(
         ? tx`update invitations set
               status = 'invited', company_name = ${companyName || null},
               participant_role = ${participantRole}, work_package = ${workPackage || null},
+              lead_contractor_id = ${user.id},
               responded_at = null, joined_at = null, verified_at = null,
               updated_at = now()
             where id = ${existing.id} and workspace_id = ${workspaceId}
               and exists (select 1 from contract_workspaces cw where cw.id = invitations.workspace_id and cw.lead_contractor_id = ${user.id})`
         : tx`insert into invitations
-              (id, workspace_id, email, company_name, participant_role, work_package, created_by)
-            values (${invitationId}, ${workspaceId}, ${email},
+              (id, workspace_id, lead_contractor_id, email, company_name, participant_role, work_package, created_by)
+            values (${invitationId}, ${workspaceId}, ${user.id}, ${email},
                     ${companyName || null}, ${participantRole}, ${workPackage || null},
                     ${user.id})
               on conflict (id) do nothing`,
@@ -777,12 +778,12 @@ export async function doSeedDemo(): Promise<SimpleResult> {
          values (${pkgIds[2]}, ${wsId}, 'Security — site access & patrols',
                  ${"Site access control, visitor management and night patrols on a 6-storey office building."},
                  ${"Guard presence 22:00–06:00, key-holder service, incident reports within 12h."}, 'Security', ${user.id}, ${user.id})`,
-      tx`insert into invitations (id, workspace_id, email, company_name, participant_role, work_package, created_by)
-         values (${invIds[0]}, ${wsId}, 'bids@meridianhvac.com', 'Meridian HVAC Ltd.', 'subcontractor', 'HVAC — servicing & repairs', ${user.id})`,
-      tx`insert into invitations (id, workspace_id, email, company_name, participant_role, work_package, created_by)
-         values (${invIds[1]}, ${wsId}, 'ops@clearviewcleaning.com', 'Clearview Cleaning', 'subcontractor', 'Cleaning — daily janitorial', ${user.id})`,
-      tx`insert into invitations (id, workspace_id, email, company_name, participant_role, work_package, created_by)
-         values (${invIds[2]}, ${wsId}, 'tenders@northgatesecurity.com', 'Northgate Security', 'subcontractor', 'Security — site access & patrols', ${user.id})`,
+      tx`insert into invitations (id, workspace_id, lead_contractor_id, email, company_name, participant_role, work_package, created_by)
+         values (${invIds[0]}, ${wsId}, ${user.id}, 'bids@meridianhvac.com', 'Meridian HVAC Ltd.', 'subcontractor', 'HVAC — servicing & repairs', ${user.id})`,
+      tx`insert into invitations (id, workspace_id, lead_contractor_id, email, company_name, participant_role, work_package, created_by)
+         values (${invIds[1]}, ${wsId}, ${user.id}, 'ops@clearviewcleaning.com', 'Clearview Cleaning', 'subcontractor', 'Cleaning — daily janitorial', ${user.id})`,
+      tx`insert into invitations (id, workspace_id, lead_contractor_id, email, company_name, participant_role, work_package, created_by)
+         values (${invIds[2]}, ${wsId}, ${user.id}, 'tenders@northgatesecurity.com', 'Northgate Security', 'subcontractor', 'Security — site access & patrols', ${user.id})`,
       auditQuery(tx, user.id, "workspace.create", { workspaceId: wsId, title: DEMO_WORKSPACE_TITLE, status: "active", demo: true }),
       auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3 }),
     ]);

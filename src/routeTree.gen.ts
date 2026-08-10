@@ -14,9 +14,28 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces/index'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces/$workspaceId'
+import { Route as AdminVerificationRouteImport } from './routes/admin/verification'
+import { Route as AdminUsersRouteImport } from './routes/admin/users'
+import { Route as AdminSupportRouteImport } from './routes/admin/support'
+import { Route as AdminSubscriptionsRouteImport } from './routes/admin/subscriptions'
+import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
+import { Route as AdminReportsRouteImport } from './routes/admin/reports'
+import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as AdminPaymentsRouteImport } from './routes/admin/payments'
+import { Route as AdminMessagesRouteImport } from './routes/admin/messages'
+import { Route as AdminLoginRouteImport } from './routes/admin/login'
+import { Route as AdminDocumentsRouteImport } from './routes/admin/documents'
+import { Route as AdminDisputesRouteImport } from './routes/admin/disputes'
+import { Route as AdminContractsRouteImport } from './routes/admin/contracts'
+import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
+import { Route as AdminAuditLogRouteImport } from './routes/admin/audit-log'
+import { Route as AdminUsersUserIdRouteImport } from './routes/admin/users/$userId'
+import { Route as AdminCompaniesCompanyIdRouteImport } from './routes/admin/companies/$companyId'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
@@ -43,6 +62,11 @@ const AppRoute = AppRouteImport.update({
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -53,21 +77,130 @@ const WorkspacesIndexRoute = WorkspacesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   id: '/$workspaceId',
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const AdminVerificationRoute = AdminVerificationRouteImport.update({
+  id: '/verification',
+  path: '/verification',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSupportRoute = AdminSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSubscriptionsRoute = AdminSubscriptionsRouteImport.update({
+  id: '/subscriptions',
+  path: '/subscriptions',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReportsRoute = AdminReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminProjectsRoute = AdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPaymentsRoute = AdminPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminMessagesRoute = AdminMessagesRouteImport.update({
+  id: '/messages',
+  path: '/messages',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDocumentsRoute = AdminDocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminDisputesRoute = AdminDisputesRouteImport.update({
+  id: '/disputes',
+  path: '/disputes',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminContractsRoute = AdminContractsRouteImport.update({
+  id: '/contracts',
+  path: '/contracts',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminCompaniesRoute = AdminCompaniesRouteImport.update({
+  id: '/companies',
+  path: '/companies',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
+  id: '/audit-log',
+  path: '/audit-log',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
+  id: '/$userId',
+  path: '/$userId',
+  getParentRoute: () => AdminUsersRoute,
+} as any)
+const AdminCompaniesCompanyIdRoute = AdminCompaniesCompanyIdRouteImport.update({
+  id: '/$companyId',
+  path: '/$companyId',
+  getParentRoute: () => AdminCompaniesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/companies': typeof AdminCompaniesRouteWithChildren
+  '/admin/contracts': typeof AdminContractsRoute
+  '/admin/disputes': typeof AdminDisputesRoute
+  '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/messages': typeof AdminMessagesRoute
+  '/admin/payments': typeof AdminPaymentsRoute
+  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/subscriptions': typeof AdminSubscriptionsRoute
+  '/admin/support': typeof AdminSupportRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
+  '/admin/verification': typeof AdminVerificationRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,31 +208,87 @@ export interface FileRoutesByTo {
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/companies': typeof AdminCompaniesRouteWithChildren
+  '/admin/contracts': typeof AdminContractsRoute
+  '/admin/disputes': typeof AdminDisputesRoute
+  '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/messages': typeof AdminMessagesRoute
+  '/admin/payments': typeof AdminPaymentsRoute
+  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/subscriptions': typeof AdminSubscriptionsRoute
+  '/admin/support': typeof AdminSupportRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
+  '/admin/verification': typeof AdminVerificationRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/admin': typeof AdminIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/companies': typeof AdminCompaniesRouteWithChildren
+  '/admin/contracts': typeof AdminContractsRoute
+  '/admin/disputes': typeof AdminDisputesRoute
+  '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/login': typeof AdminLoginRoute
+  '/admin/messages': typeof AdminMessagesRoute
+  '/admin/payments': typeof AdminPaymentsRoute
+  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/admin/subscriptions': typeof AdminSubscriptionsRoute
+  '/admin/support': typeof AdminSupportRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
+  '/admin/verification': typeof AdminVerificationRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/app'
     | '/invitations'
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/admin/audit-log'
+    | '/admin/companies'
+    | '/admin/contracts'
+    | '/admin/disputes'
+    | '/admin/documents'
+    | '/admin/login'
+    | '/admin/messages'
+    | '/admin/payments'
+    | '/admin/projects'
+    | '/admin/reports'
+    | '/admin/settings'
+    | '/admin/subscriptions'
+    | '/admin/support'
+    | '/admin/users'
+    | '/admin/verification'
     | '/workspaces/$workspaceId'
+    | '/admin/'
     | '/workspaces/'
+    | '/admin/companies/$companyId'
+    | '/admin/users/$userId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -107,22 +296,60 @@ export interface FileRouteTypes {
     | '/invitations'
     | '/login'
     | '/signup'
+    | '/admin/audit-log'
+    | '/admin/companies'
+    | '/admin/contracts'
+    | '/admin/disputes'
+    | '/admin/documents'
+    | '/admin/login'
+    | '/admin/messages'
+    | '/admin/payments'
+    | '/admin/projects'
+    | '/admin/reports'
+    | '/admin/settings'
+    | '/admin/subscriptions'
+    | '/admin/support'
+    | '/admin/users'
+    | '/admin/verification'
     | '/workspaces/$workspaceId'
+    | '/admin'
     | '/workspaces'
+    | '/admin/companies/$companyId'
+    | '/admin/users/$userId'
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/app'
     | '/invitations'
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/admin/audit-log'
+    | '/admin/companies'
+    | '/admin/contracts'
+    | '/admin/disputes'
+    | '/admin/documents'
+    | '/admin/login'
+    | '/admin/messages'
+    | '/admin/payments'
+    | '/admin/projects'
+    | '/admin/reports'
+    | '/admin/settings'
+    | '/admin/subscriptions'
+    | '/admin/support'
+    | '/admin/users'
+    | '/admin/verification'
     | '/workspaces/$workspaceId'
+    | '/admin/'
     | '/workspaces/'
+    | '/admin/companies/$companyId'
+    | '/admin/users/$userId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRoute
   InvitationsRoute: typeof InvitationsRoute
   LoginRoute: typeof LoginRoute
@@ -167,6 +394,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -181,6 +415,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesIndexRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/workspaces/$workspaceId': {
       id: '/workspaces/$workspaceId'
       path: '/$workspaceId'
@@ -188,8 +429,191 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/admin/verification': {
+      id: '/admin/verification'
+      path: '/verification'
+      fullPath: '/admin/verification'
+      preLoaderRoute: typeof AdminVerificationRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/support': {
+      id: '/admin/support'
+      path: '/support'
+      fullPath: '/admin/support'
+      preLoaderRoute: typeof AdminSupportRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/subscriptions': {
+      id: '/admin/subscriptions'
+      path: '/subscriptions'
+      fullPath: '/admin/subscriptions'
+      preLoaderRoute: typeof AdminSubscriptionsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reports': {
+      id: '/admin/reports'
+      path: '/reports'
+      fullPath: '/admin/reports'
+      preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/projects': {
+      id: '/admin/projects'
+      path: '/projects'
+      fullPath: '/admin/projects'
+      preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/payments': {
+      id: '/admin/payments'
+      path: '/payments'
+      fullPath: '/admin/payments'
+      preLoaderRoute: typeof AdminPaymentsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/messages': {
+      id: '/admin/messages'
+      path: '/messages'
+      fullPath: '/admin/messages'
+      preLoaderRoute: typeof AdminMessagesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/login': {
+      id: '/admin/login'
+      path: '/login'
+      fullPath: '/admin/login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/documents': {
+      id: '/admin/documents'
+      path: '/documents'
+      fullPath: '/admin/documents'
+      preLoaderRoute: typeof AdminDocumentsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/disputes': {
+      id: '/admin/disputes'
+      path: '/disputes'
+      fullPath: '/admin/disputes'
+      preLoaderRoute: typeof AdminDisputesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/contracts': {
+      id: '/admin/contracts'
+      path: '/contracts'
+      fullPath: '/admin/contracts'
+      preLoaderRoute: typeof AdminContractsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/companies': {
+      id: '/admin/companies'
+      path: '/companies'
+      fullPath: '/admin/companies'
+      preLoaderRoute: typeof AdminCompaniesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/audit-log': {
+      id: '/admin/audit-log'
+      path: '/audit-log'
+      fullPath: '/admin/audit-log'
+      preLoaderRoute: typeof AdminAuditLogRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/users/$userId': {
+      id: '/admin/users/$userId'
+      path: '/$userId'
+      fullPath: '/admin/users/$userId'
+      preLoaderRoute: typeof AdminUsersUserIdRouteImport
+      parentRoute: typeof AdminUsersRoute
+    }
+    '/admin/companies/$companyId': {
+      id: '/admin/companies/$companyId'
+      path: '/$companyId'
+      fullPath: '/admin/companies/$companyId'
+      preLoaderRoute: typeof AdminCompaniesCompanyIdRouteImport
+      parentRoute: typeof AdminCompaniesRoute
+    }
   }
 }
+
+interface AdminCompaniesRouteChildren {
+  AdminCompaniesCompanyIdRoute: typeof AdminCompaniesCompanyIdRoute
+}
+
+const AdminCompaniesRouteChildren: AdminCompaniesRouteChildren = {
+  AdminCompaniesCompanyIdRoute: AdminCompaniesCompanyIdRoute,
+}
+
+const AdminCompaniesRouteWithChildren = AdminCompaniesRoute._addFileChildren(
+  AdminCompaniesRouteChildren,
+)
+
+interface AdminUsersRouteChildren {
+  AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
+}
+
+const AdminUsersRouteChildren: AdminUsersRouteChildren = {
+  AdminUsersUserIdRoute: AdminUsersUserIdRoute,
+}
+
+const AdminUsersRouteWithChildren = AdminUsersRoute._addFileChildren(
+  AdminUsersRouteChildren,
+)
+
+interface AdminRouteChildren {
+  AdminAuditLogRoute: typeof AdminAuditLogRoute
+  AdminCompaniesRoute: typeof AdminCompaniesRouteWithChildren
+  AdminContractsRoute: typeof AdminContractsRoute
+  AdminDisputesRoute: typeof AdminDisputesRoute
+  AdminDocumentsRoute: typeof AdminDocumentsRoute
+  AdminLoginRoute: typeof AdminLoginRoute
+  AdminMessagesRoute: typeof AdminMessagesRoute
+  AdminPaymentsRoute: typeof AdminPaymentsRoute
+  AdminProjectsRoute: typeof AdminProjectsRoute
+  AdminReportsRoute: typeof AdminReportsRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
+  AdminSubscriptionsRoute: typeof AdminSubscriptionsRoute
+  AdminSupportRoute: typeof AdminSupportRoute
+  AdminUsersRoute: typeof AdminUsersRouteWithChildren
+  AdminVerificationRoute: typeof AdminVerificationRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminAuditLogRoute: AdminAuditLogRoute,
+  AdminCompaniesRoute: AdminCompaniesRouteWithChildren,
+  AdminContractsRoute: AdminContractsRoute,
+  AdminDisputesRoute: AdminDisputesRoute,
+  AdminDocumentsRoute: AdminDocumentsRoute,
+  AdminLoginRoute: AdminLoginRoute,
+  AdminMessagesRoute: AdminMessagesRoute,
+  AdminPaymentsRoute: AdminPaymentsRoute,
+  AdminProjectsRoute: AdminProjectsRoute,
+  AdminReportsRoute: AdminReportsRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
+  AdminSubscriptionsRoute: AdminSubscriptionsRoute,
+  AdminSupportRoute: AdminSupportRoute,
+  AdminUsersRoute: AdminUsersRouteWithChildren,
+  AdminVerificationRoute: AdminVerificationRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface WorkspacesRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
@@ -207,6 +631,7 @@ const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRoute,
   InvitationsRoute: InvitationsRoute,
   LoginRoute: LoginRoute,

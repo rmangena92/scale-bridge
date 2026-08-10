@@ -55,6 +55,15 @@ export const SCHEMA_SQL: string[] = [
     password_hash text not null,
     created_at timestamptz not null default now()
   )`,
+  // Admin Portal additions (idempotent): account lifecycle status + internal
+  // notes. status follows the spec's user statuses: active, suspended,
+  // deactivated, invited, pending_verification.
+  `alter table users add column if not exists status text not null default 'active'`,
+  `alter table users drop constraint if exists users_status_check`,
+  `alter table users add constraint users_status_check check (
+    status in ('active','suspended','deactivated','invited','pending_verification')
+  )`,
+  `alter table users add column if not exists internal_notes text[] not null default '{}'::text[]`,
 
   // companies is created before profiles because profiles.company_id fks to it.
   // owner_id is unique: for the MVP each user manages exactly one company
@@ -70,6 +79,16 @@ export const SCHEMA_SQL: string[] = [
       check (verification_status in ('unverified','pending','verified')),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
+  )`,
+  // Admin Portal additions (idempotent). The verification_status check is
+  // widened to the full spec lifecycle (draft → registered →
+  // documents_pending → under_review → verified, plus rejected / suspended /
+  // archived) while keeping the legacy values ('unverified','pending') valid
+  // for the existing self-serve company flow. Drop + re-add is idempotent.
+  `alter table companies add column if not exists internal_notes text[] not null default '{}'::text[]`,
+  `alter table companies drop constraint if exists companies_verification_status_check`,
+  `alter table companies add constraint companies_verification_status_check check (
+    verification_status in ('unverified','pending','verified','draft','registered','documents_pending','under_review','rejected','suspended','archived')
   )`,
 
   `create table if not exists profiles (
@@ -391,6 +410,14 @@ export const SCHEMA_SQL: string[] = [
     uploaded_by uuid references users(id) on delete set null,
     uploaded_at timestamptz not null default now()
   )`,
+  // Admin Portal additions (idempotent): document verification workflow
+  // (Part B) + expiry tracking for licences / insurance / certificates.
+  `alter table documents add column if not exists review_status text not null default 'pending'`,
+  `alter table documents drop constraint if exists documents_review_status_check`,
+  `alter table documents add constraint documents_review_status_check check (
+    review_status in ('pending','approved','rejected','needs_replacement','clarification_requested')
+  )`,
+  `alter table documents add column if not exists expiry_date date`,
 
   // ------------------------------------------------------------------
   // Indexes

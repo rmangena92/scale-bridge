@@ -30,7 +30,7 @@ import {
 } from "./db";
 import { auditQuery } from "./audit";
 import { DEFAULT_ROLE } from "./types";
-import type { PublicUser, Role } from "./types";
+import type { AdminRole, AdminSession, PublicUser, Role } from "./types";
 
 export const SESSION_COOKIE = "sb_session";
 const SESSION_TTL_SECS = 60 * 60 * 24 * 30; // 30 days
@@ -142,6 +142,38 @@ async function loadRole(userId: string): Promise<Role> {
     tx`select role from profiles where user_id = ${userId}`,
   ]))[1] as { role: Role }[];
   return rows[0]?.role ?? DEFAULT_ROLE;
+}
+
+// ---------------------------------------------------------------- admin auth
+/**
+ * Resolve the session user as a ScaleBridge administrator.
+ *
+ * Returns the user with role forced to 'sb_admin' (so every asUser() RLS scope
+ * built on this user sees the `current_setting('app.role') = 'sb_admin'` admin
+ * policies) plus their staff roles from admin_roles. Returns null when there
+ * is no session or the user has no admin_roles row — the caller must treat
+ * null as "not an administrator" and deny.
+ *
+ * The admin_roles select itself runs under the user's *profile* role via the
+ * `admin_roles.user_id = app.user_id` policy clause (which does not require
+ * sb_admin), so this helper works before the user is ever scoped as sb_admin.
+ */
+export async function loadAdminUser(): Promise<AdminSession | null> {
+  if (!dbConfigured()) return null;
+  const sessionUser = await loadSessionUser();
+  if (!sessionUser) return null;
+
+  const rows = (await asUser(sessionUser.id, sessionUser.role, (tx) => [
+    tx`select role from admin_roles where user_id = ${sessionUser.id}`,
+  ]))[1] as { role: AdminRole }[];
+  const staffRoles = rows.map((r) => r.role);
+  if (staffRoles.length === 0) return null;
+
+  return {
+    user: { ...sessionUser, role: "sb_admin" },
+    staffRoles,
+    canMutate: staffRoles.some((r) => r !== "read_only"),
+  };
 }
 
 // -------------------------------------------------------------------- flows

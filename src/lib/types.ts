@@ -235,3 +235,202 @@ export type AuditEntry = {
   details: AuditDetails | null;
   createdAt: string;
 };
+
+// -------------------------------------------------------------- admin portal
+/** Internal ScaleBridge staff roles (admin_roles.role). */
+export const ADMIN_ROLES = [
+  "super_admin",
+  "operations",
+  "compliance",
+  "finance",
+  "support",
+  "read_only",
+] as const;
+
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+export const ADMIN_ROLE_LABELS: Record<AdminRole, string> = {
+  super_admin: "Super admin",
+  operations: "Operations",
+  compliance: "Compliance",
+  finance: "Finance",
+  support: "Support",
+  read_only: "Read-only",
+};
+
+/** Account status for users (spec: Invited / Active / Pending Verification / Suspended / Deactivated). */
+export const USER_STATUSES = [
+  "active",
+  "suspended",
+  "deactivated",
+  "invited",
+  "pending_verification",
+] as const;
+
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+export const USER_STATUS_LABELS: Record<UserStatus, string> = {
+  active: "Active",
+  suspended: "Suspended",
+  deactivated: "Deactivated",
+  invited: "Invited",
+  pending_verification: "Pending Verification",
+};
+
+/** Company lifecycle (spec statuses + the two legacy self-serve values). */
+export const COMPANY_STATUSES = [
+  "draft",
+  "registered",
+  "documents_pending",
+  "under_review",
+  "verified",
+  "rejected",
+  "suspended",
+  "archived",
+  "unverified",
+  "pending",
+] as const;
+
+export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
+
+export const COMPANY_STATUS_LABELS: Record<CompanyStatus, string> = {
+  draft: "Draft",
+  registered: "Registered",
+  documents_pending: "Documents Pending",
+  under_review: "Under Review",
+  verified: "Verified",
+  rejected: "Rejected",
+  suspended: "Suspended",
+  archived: "Archived",
+  unverified: "Not Verified",
+  pending: "Verification Pending",
+};
+
+/** The session user as resolved for the Admin Portal, with staff roles. */
+export type AdminSession = {
+  user: PublicUser; // role is always 'sb_admin' here
+  staffRoles: AdminRole[];
+  canMutate: boolean; // false when the staff member is read_only
+};
+
+/** Dashboard stat bundle returned to /admin. */
+export type AdminDashboardStats = {
+  totalUsers: number;
+  totalCompanies: number;
+  companiesAwaitingVerification: number;
+  activeContracts: number;
+  contractsAwaitingResponses: number;
+  activeProjectWorkspaces: number;
+  openSupportRequests: number;
+  openDisputes: number;
+  pendingDocumentReviews: number;
+  outstandingPayments: number; // sum of unpaid contract invoice amounts
+  monthlyRecurringRevenue: number; // 0 until subscriptions ship (Part B)
+  recentActivity: {
+    id: string;
+    action: string;
+    actorEmail: string | null;
+    details: AuditDetails | null;
+    createdAt: string;
+  }[];
+  expiringLicences: {
+    id: string;
+    name: string;
+    category: string | null;
+    expiryDate: string | null;
+    companyName: string | null;
+  }[];
+};
+
+/** Row in the admin users list. */
+export type AdminUserSummary = {
+  id: string;
+  email: string;
+  name: string | null;
+  systemRole: Role | null;
+  status: UserStatus;
+  companyId: string | null;
+  companyName: string | null;
+  staffRoles: AdminRole[];
+  createdAt: string;
+};
+
+/** Full admin view of one user. */
+export type AdminUserDetail = {
+  user: AdminUserSummary;
+  companies: {
+    id: string;
+    name: string;
+    type: string | null;
+    verificationStatus: CompanyStatus;
+    createdAt: string;
+  }[];
+  invitations: {
+    id: string;
+    workspaceId: string;
+    workspaceTitle: string | null;
+    email: string;
+    companyName: string | null;
+    participantRole: ParticipantRole;
+    status: InvitationStatus;
+    createdAt: string;
+    respondedAt: string | null;
+  }[];
+  sessions: {
+    id: string;
+    createdAt: string;
+    lastUsedAt: string;
+    expiresAt: string;
+  }[];
+  internalNotes: string[];
+};
+
+/** Row in the admin companies list. */
+export type AdminCompanySummary = {
+  id: string;
+  name: string;
+  type: string | null;
+  verificationStatus: CompanyStatus;
+  ownerId: string;
+  ownerEmail: string | null;
+  createdAt: string;
+};
+
+/** Full admin view of one company. */
+export type AdminCompanyDetail = {
+  company: {
+    id: string;
+    name: string;
+    type: string | null;
+    description: string | null;
+    contactEmail: string | null;
+    verificationStatus: CompanyStatus;
+    ownerId: string;
+    ownerEmail: string | null;
+    internalNotes: string[];
+    createdAt: string;
+    updatedAt: string;
+  };
+  users: {
+    userId: string;
+    name: string | null;
+    email: string;
+    systemRole: Role;
+  }[];
+  documents: {
+    id: string;
+    name: string;
+    category: string | null;
+    visibility: string;
+    reviewStatus: string;
+    expiryDate: string | null;
+    uploadedAt: string;
+  }[];
+  contracts: {
+    id: string;
+    title: string;
+    status: WorkspaceStatus;
+    createdAt: string;
+  }[];
+};
+

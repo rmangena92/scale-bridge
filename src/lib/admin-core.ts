@@ -1874,6 +1874,11 @@ export async function doListAuditLogs(input: {
   const workspace = (input.workspace ?? "").trim();
   const from = (input.from ?? "").trim();
   const to = (input.to ?? "").trim();
+  // postgres.js coerces parameters adjacent to a ::timestamptz cast into Date
+  // objects (new Date(' 00:00:00') → Invalid Date, RangeError). Bind real
+  // Date values instead and use coalesce() so empty filters stay type-safe.
+  const fromDate = /^\d{4}-\d{2}-\d{2}$/.test(from) ? new Date(`${from}T00:00:00Z`) : null;
+  const toDate = /^\d{4}-\d{2}-\d{2}$/.test(to) ? new Date(`${to}T23:59:59.999Z`) : null;
   const page = Math.max(1, Number(input.page) || 1);
   const pageSize = Math.min(100, Math.max(10, Number(input.pageSize) || 25));
   try {
@@ -1890,8 +1895,8 @@ export async function doListAuditLogs(input: {
          where (${actor} = '' or u.email ilike ${`%${actor}%`})
            and (${action} = '' or a.action = ${action})
            and (${workspace} = '' or coalesce(cw.title, '') ilike ${`%${workspace}%`})
-           and (${from} = '' or a.created_at >= ${`${from} 00:00:00`}::timestamptz)
-           and (${to} = '' or a.created_at < (${`${to} 23:59:59`}::timestamptz + interval '1 second'))
+           and a.created_at >= coalesce(${fromDate}, '1900-01-01'::timestamptz)
+           and a.created_at < coalesce(${toDate}, '2999-12-31'::timestamptz)
          order by a.created_at desc
          limit ${pageSize} offset ${(page - 1) * pageSize}`,
       tx`select count(*)::int as total from audit_logs a
@@ -1900,8 +1905,8 @@ export async function doListAuditLogs(input: {
          where (${actor} = '' or u.email ilike ${`%${actor}%`})
            and (${action} = '' or a.action = ${action})
            and (${workspace} = '' or coalesce(cw.title, '') ilike ${`%${workspace}%`})
-           and (${from} = '' or a.created_at >= ${`${from} 00:00:00`}::timestamptz)
-           and (${to} = '' or a.created_at < (${`${to} 23:59:59`}::timestamptz + interval '1 second'))`,
+           and a.created_at >= coalesce(${fromDate}, '1900-01-01'::timestamptz)
+           and a.created_at < coalesce(${toDate}, '2999-12-31'::timestamptz)`,
       tx`select distinct action from audit_logs order by action`,
     ]);
     const list = rows[1] as {

@@ -1,8 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ComingSoon } from "~/components/AdminShell";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
+/** /admin/contracts layout — contract list (index) or contract detail page. */
 export const Route = createFileRoute("/admin/contracts")({
-  component: () => (
-    <ComingSoon title="contracts" blurb="Full contract administration — filter, inspect, suspend or archive contract workspaces (Part B)." />
-  ),
+  component: ContractsLayout,
 });
+
+function ContractsLayout() {
+  return <Outlet />;
+}

@@ -28,7 +28,6 @@ import {
   EmptyState,
   ErrorText,
   Field,
-  Input,
   Select,
   Textarea,
 } from "~/components/ui";
@@ -89,7 +88,7 @@ function UserDetailBody({
 }) {
   const [status, setStatus] = useState(detail.user.status);
   const [systemRole, setSystemRole] = useState<Role | "">(detail.user.systemRole ?? "");
-  const [adminRoles, setAdminRoles] = useState<AdminRole[]>(detail.user.staffRoles);
+  const [adminRoles, setRoleDraft] = useState<AdminRole[]>(detail.user.staffRoles);
   const [notes, setNotes] = useState<string[]>(detail.internalNotes);
   const [noteText, setNoteText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -169,7 +168,7 @@ function UserDetailBody({
   }
 
   function toggleAdminRole(r: AdminRole) {
-    setAdminRoles((prev) =>
+    setRoleDraft((prev) =>
       prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r],
     );
   }

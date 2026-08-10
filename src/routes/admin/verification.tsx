@@ -1,8 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ComingSoon } from "~/components/AdminShell";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
+/** /admin/verification layout — queue list (index) or company review page. */
 export const Route = createFileRoute("/admin/verification")({
-  component: () => (
-    <ComingSoon title="verification" blurb="Company verification queue — document review, approval and rejection of company verification (Part B)." />
-  ),
+  component: VerificationLayout,
 });
+
+function VerificationLayout() {
+  return <Outlet />;
+}

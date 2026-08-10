@@ -418,6 +418,32 @@ export const SCHEMA_SQL: string[] = [
     review_status in ('pending','approved','rejected','needs_replacement','clarification_requested')
   )`,
   `alter table documents add column if not exists expiry_date date`,
+  // Admin Portal Part B (idempotent): document review workflow metadata —
+  // who reviewed a document, when, and what they said. The review decision
+  // itself lives in review_status; these columns carry the audit context shown
+  // on the document review screen and the company verification screen.
+  `alter table documents add column if not exists reviewed_by uuid references users(id) on delete set null`,
+  `alter table documents add column if not exists review_comment text`,
+  `alter table documents add column if not exists reviewed_at timestamptz`,
+  // Set by the "set expiry reminder" verification action; feeds the expiring
+  // licences list on the dashboard.
+  `alter table documents add column if not exists expiry_reminder_at timestamptz`,
+
+  // Admin Portal Part B contract administration columns (idempotent):
+  // industry / location / value power the contract list filters, internal_notes
+  // records admin notes on the workspace, internal_support_user_id is the
+  // assigned ScaleBridge staff member (from admin_roles).
+  `alter table contract_workspaces add column if not exists industry text`,
+  `alter table contract_workspaces add column if not exists location text`,
+  `alter table contract_workspaces add column if not exists contract_value numeric(14,2)`,
+  `alter table contract_workspaces add column if not exists internal_notes text[] not null default '{}'::text[]`,
+  `alter table contract_workspaces add column if not exists internal_support_user_id uuid references users(id) on delete set null`,
+  // Part B: admins suspend contracts (the spec's status list). Drop + re-add
+  // is idempotent and keeps the legacy workspace statuses valid.
+  `alter table contract_workspaces drop constraint if exists contract_workspaces_status_check`,
+  `alter table contract_workspaces add constraint contract_workspaces_status_check check (
+    status in ('draft','active','in_review','suspended','completed','archived')
+  )`,
 
   // ------------------------------------------------------------------
   // Indexes
@@ -426,6 +452,11 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists sessions_user_id_idx on sessions (user_id)`,
   `create index if not exists profiles_company_id_idx on profiles (company_id)`,
   `create index if not exists contract_workspaces_lead_idx on contract_workspaces (lead_contractor_id)`,
+  `create index if not exists contract_workspaces_status_idx on contract_workspaces (status)`,
+  `create index if not exists audit_logs_created_at_idx on audit_logs (created_at desc)`,
+  `create index if not exists audit_logs_action_idx on audit_logs (action)`,
+  `create index if not exists documents_review_status_idx on documents (review_status)`,
+  `create index if not exists support_cases_case_number_idx on support_cases (case_number)`,
   `create index if not exists invitations_workspace_id_idx on invitations (workspace_id)`,
   `create index if not exists invitations_company_id_idx on invitations (company_id)`,
   `create index if not exists invitations_email_idx on invitations (lower(email))`,

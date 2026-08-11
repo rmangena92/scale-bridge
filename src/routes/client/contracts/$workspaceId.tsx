@@ -371,7 +371,7 @@ function RecentActivityCard({ detail }: { detail: ClientContractDetail }) {
                 <p className="truncate font-mono text-[11px] font-semibold text-navy">{a.action}</p>
                 <p className="truncate text-xs text-muted">{a.actorEmail ?? "system"}</p>
               </div>
-              <span className="shrink-0 text-[11px] text-muted">{shortDate(a.createdAt)}</span>
+              <span className="shrink-0 text-[11px] text-muted">{a.createdAt ? shortDate(a.createdAt) : "—"}</span>
             </li>
           ))}
         </ul>

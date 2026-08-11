@@ -281,7 +281,7 @@ function RecentActivity({ stats }: { stats: ClientDashboardStats }) {
                 <p className="truncate font-mono text-xs font-semibold text-navy">{a.action}</p>
                 <p className="truncate text-xs text-muted">{a.actorEmail ?? "system"}</p>
               </div>
-              <span className="shrink-0 text-xs text-muted">{formatDate(a.createdAt)}</span>
+              <span className="shrink-0 text-xs text-muted">{a.createdAt ? formatDate(a.createdAt) : "—"}</span>
             </li>
           ))}
         </ul>

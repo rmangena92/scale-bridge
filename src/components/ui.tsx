@@ -132,6 +132,8 @@ const badgeTones: Record<string, string> = {
   red: "bg-danger/10 text-danger ring-danger/20",
   slate: "bg-slate-100 text-muted ring-slate-200",
   navy: "bg-navy/10 text-navy ring-navy/20",
+  // on-dark variant for badges sitting on navy/dark cards (hero partnership chips)
+  onDark: "bg-white/10 text-teal ring-white/20",
 };
 
 export function Badge({

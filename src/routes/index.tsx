@@ -325,7 +325,7 @@ function SiteNav() {
         <a href="/" aria-label="ScaleBridge home" className="shrink-0">
           <Logo />
         </a>
-        <nav className="ml-10 hidden flex-1 items-center gap-6 text-sm font-semibold text-muted xl:flex">
+        <nav className="ml-10 hidden flex-1 items-center justify-center gap-6 text-sm font-semibold text-muted xl:flex">
           {NAV_LINKS.map((link) => (
             <a key={link.label} href={link.href} className="whitespace-nowrap hover:text-brand">
               {link.label}
@@ -339,9 +339,9 @@ function SiteNav() {
 
 // ================================================================== hero
 const HERO_PARTNERS = [
-  { name: "Reyes Facilities Group", pkg: "HVAC — servicing & repairs", status: "Verified", tone: "green" as const },
-  { name: "Clearview Cleaning", pkg: "Cleaning — daily janitorial", status: "Joined", tone: "teal" as const },
-  { name: "Northgate Security", pkg: "Security — site access & patrols", status: "Invited", tone: "blue" as const },
+  { name: "Reyes Facilities Group", pkg: "HVAC — servicing & repairs", status: "Verified" },
+  { name: "Clearview Cleaning", pkg: "Cleaning — daily janitorial", status: "Joined" },
+  { name: "Northgate Security", pkg: "Security — site access & patrols", status: "Invited" },
 ];
 
 function Hero() {
@@ -367,14 +367,19 @@ function Hero() {
             fulfil larger contracts without leaving smaller companies behind.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <ButtonLink to="/signup" variant="primary" size="lg" className="w-full sm:w-auto">
+            <ButtonLink
+              to="/signup"
+              variant="primary"
+              size="lg"
+              className="w-full md:min-w-80 sm:w-auto"
+            >
               Build Your Partner Profile
             </ButtonLink>
             <ButtonLink
               to="/login"
               variant="outline"
               size="lg"
-              className="w-full border-white/25 bg-white/5 text-white hover:border-teal hover:text-teal sm:w-auto"
+              className="w-full border-white/25 bg-white/5 text-white hover:border-teal hover:text-teal sm:w-auto md:min-w-80"
             >
               Create a Partnership Workspace
             </ButtonLink>
@@ -403,7 +408,7 @@ function Hero() {
                   <p className="truncate text-sm font-semibold text-white">{c.name}</p>
                   <p className="mt-0.5 text-xs text-slate-400">{c.pkg}</p>
                   <div className="mt-3">
-                    <Badge tone={c.tone}>{c.status}</Badge>
+                    <Badge tone="onDark">{c.status}</Badge>
                   </div>
                 </div>
               ))}
@@ -472,13 +477,11 @@ function HowItWorks() {
         {STEPS.map((item) => (
           <li
             key={item.step}
-            className="group relative rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]"
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]"
           >
-            <div className="mb-4 flex items-center justify-between">
-              <span className="font-display text-2xl font-extrabold text-teal">
-                {item.step}
-              </span>
-            </div>
+            <span className="mb-4 block font-display text-2xl font-extrabold text-teal">
+              {item.step}
+            </span>
             <h3 className="text-base font-bold text-navy">{item.title}</h3>
             <p className="mt-1.5 text-sm leading-relaxed text-muted">{item.body}</p>
           </li>
@@ -539,7 +542,7 @@ function Services({ categories, services }: { categories: ServiceCategoryRow[]; 
         title="Find the capabilities that complete the opportunity."
         body="ScaleBridge brings together businesses across complementary industries and service categories, making it easier to identify the right partners for each opportunity."
       />
-      <p className="mx-auto -mt-6 mb-12 max-w-2xl text-center text-sm text-muted">
+      <p className="mx-auto -mt-6 mb-8 max-w-2xl text-center text-sm text-muted">
         Service categories should be managed dynamically through the Master Admin
         Portal so the website can expand as the network grows.
       </p>
@@ -553,12 +556,12 @@ function Services({ categories, services }: { categories: ServiceCategoryRow[]; 
       </div>
       <div
         id="partner-directory"
-        className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        className="mt-8 grid scroll-mt-20 gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         {cards.map((card) => (
           <div
             key={card.key}
-            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-card)]"
+            className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-card)]"
           >
             <h3 className="text-base font-bold text-navy">{card.name}</h3>
             <p className="mt-1.5 text-sm leading-relaxed text-muted">{card.body}</p>
@@ -616,7 +619,7 @@ function Audience() {
   return (
     <Section className="bg-white">
       <div className="grid gap-6 lg:grid-cols-3">
-        <div id="for-anchor-partners" className="rounded-3xl border border-slate-200 bg-mist p-8 sm:p-10">
+        <div id="for-anchor-partners" className="scroll-mt-20 rounded-3xl border border-slate-200 bg-mist p-8 sm:p-10">
           <Badge tone="blue" className="mb-4">
             For anchor partners
           </Badge>
@@ -641,7 +644,7 @@ function Audience() {
           </ButtonLink>
         </div>
 
-        <div id="for-businesses" className="rounded-3xl border border-slate-200 bg-navy p-8 text-white sm:p-10">
+        <div id="for-businesses" className="scroll-mt-20 rounded-3xl border border-slate-200 bg-navy p-8 text-white sm:p-10">
           <Badge tone="teal" className="mb-4">
             For partner businesses
           </Badge>
@@ -666,7 +669,7 @@ function Audience() {
           </ButtonLink>
         </div>
 
-        <div id="for-clients" className="rounded-3xl border border-slate-200 bg-mist p-8 sm:p-10">
+        <div id="for-clients" className="scroll-mt-20 rounded-3xl border border-slate-200 bg-mist p-8 sm:p-10">
           <Badge tone="blue" className="mb-4">
             For clients and principals
           </Badge>
@@ -781,7 +784,7 @@ function Trust() {
 // ================================================================ final CTA
 function FinalCta() {
   return (
-    <section className="bg-mist pb-20">
+    <section className="bg-mist py-20">
       <div className="container-site">
         <div className="overflow-hidden rounded-3xl bg-navy px-6 py-14 text-center sm:px-12">
           <h2 className="text-3xl font-bold text-white sm:text-4xl">
@@ -797,14 +800,19 @@ function FinalCta() {
             more connected commercial ecosystem.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <ButtonLink to="/signup" variant="primary" size="lg" className="w-full sm:w-auto">
+            <ButtonLink
+              to="/signup"
+              variant="primary"
+              size="lg"
+              className="w-full sm:w-auto md:min-w-80"
+            >
               Build Your Partner Profile
             </ButtonLink>
             <ButtonLink
               to="/login"
               variant="outline"
               size="lg"
-              className="w-full border-white/25 bg-white/5 text-white hover:border-teal hover:text-teal sm:w-auto"
+              className="w-full border-white/25 bg-white/5 text-white hover:border-teal hover:text-teal sm:w-auto md:min-w-80"
             >
               Create a Partnership Workspace
             </ButtonLink>

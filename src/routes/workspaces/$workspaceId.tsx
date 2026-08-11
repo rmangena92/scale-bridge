@@ -33,6 +33,7 @@ import {
   updateVariationStatus,
   updateWorkspace,
   verifyParticipant,
+  reviewVerificationDocument,
 } from "~/lib/workspace";
 import {
   CLIENT_DOCUMENT_STATUS_LABELS,
@@ -57,6 +58,8 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   TASK_STATUS_TONES,
+  VERIFICATION_BADGE_TONES,
+  VERIFICATION_LABELS,
   VARIATION_STATUS_LABELS,
   VARIATION_STATUS_TONES,
   WORKSPACE_BADGE_TONES,
@@ -72,9 +75,9 @@ import type {
   ParticipantRole,
   PublicDocument,
   PublicInvoice,
-  PublicInvitation,
   PublicMilestone,
   PublicPricingSubmission,
+  ParticipantVerification,
   PublicTask,
   PublicVariation,
   PublicUser,
@@ -232,7 +235,6 @@ function WorkspaceBody({
     workspace,
     isLead,
     packages,
-    invitations,
     audit,
     documents,
     tasks,
@@ -241,6 +243,7 @@ function WorkspaceBody({
     pricingSubmissions,
     invoices,
     variations,
+    participantVerifications,
   } = data;
 
   return (
@@ -335,7 +338,7 @@ function WorkspaceBody({
       {tab === "companies" && isLead && (
         <CompaniesTab
           workspace={workspace}
-          invitations={invitations}
+          participants={participantVerifications}
           packages={packages}
           onChanged={async (msg) => {
             setNotice(msg);
@@ -344,12 +347,7 @@ function WorkspaceBody({
         />
       )}
       {tab === "companies" && !isLead && (
-        <Card className="p-8 text-center">
-          <p className="text-sm text-muted">
-            The participant list is private to the lead contractor — other
-            companies' details are never shared across the workspace.
-          </p>
-        </Card>
+        <YourVerificationCard participants={participantVerifications} />
       )}
       {tab === "packages" && (
         <PackagesTab
@@ -642,17 +640,40 @@ function OverviewField({ label, value }: { label: string; value: string }) {
 }
 
 // ------------------------------------------------------------ companies tab
+// Verification copy helpers shared by the lead table and the participant card.
+function verificationOutstanding(p: ParticipantVerification): string {
+  if (p.inviteStatus === "declined") return "Invitation declined — re-invite to include this company.";
+  if (p.inviteStatus === "invited") return "Awaiting their response to the invitation.";
+  if (p.inviteStatus === "verified") return "Fully verified — approved to work on this contract.";
+  // joined
+  const docs = p.verificationDocuments;
+  if (docs.length === 0) return "Awaiting verification documents (licences, insurance…).";
+  if (docs.some((d) => d.status === "needs_changes"))
+    return "Changes requested on submitted document(s) — awaiting resubmission.";
+  if (docs.some((d) => d.status === "under_review"))
+    return "Submitted document(s) awaiting your review.";
+  if (docs.every((d) => d.status === "approved"))
+    return "Documents approved — ready to verify this company.";
+  return "Awaiting verification documents.";
+}
+
 function CompaniesTab({
   workspace,
-  invitations,
+  participants,
   packages,
   onChanged,
 }: {
   workspace: PublicWorkspace;
-  invitations: PublicInvitation[];
+  participants: ParticipantVerification[];
   packages: PublicWorkPackage[];
   onChanged: (message: string) => Promise<void>;
 }) {
+  const counts = {
+    invited: participants.filter((p) => p.inviteStatus === "invited").length,
+    joined: participants.filter((p) => p.inviteStatus === "joined").length,
+    verified: participants.filter((p) => p.inviteStatus === "verified").length,
+    declined: participants.filter((p) => p.inviteStatus === "declined").length,
+  };
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="flex flex-col gap-6 lg:col-span-2">
@@ -668,10 +689,10 @@ function CompaniesTab({
             </div>
           </div>
           <p className="mt-1 text-sm text-muted">
-            Companies you've invited, their responses, and their status. Only
-            you can see this list.
+            Companies you've invited, their verification status and the
+            documents they've submitted. Only you can see this list.
           </p>
-          {invitations.length === 0 ? (
+          {participants.length === 0 ? (
             <div className="mt-4">
               <EmptyState
                 title="No companies invited yet"
@@ -679,71 +700,27 @@ function CompaniesTab({
               />
             </div>
           ) : (
-            <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[640px] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-muted">
-                    <th className="pb-2 pr-4">Company</th>
-                    <th className="pb-2 pr-4">Role</th>
-                    <th className="pb-2 pr-4">Work package</th>
-                    <th className="pb-2 pr-4">Status</th>
-                    <th className="pb-2 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {invitations.map((inv) => (
-                    <tr key={inv.id}>
-                      <td className="py-3 pr-4">
-                        <p className="font-semibold text-ink">
-                          {inv.companyName ?? "Unnamed company"}
-                        </p>
-                        <p className="text-xs text-muted">{inv.email}</p>
-                      </td>
-                      <td className="py-3 pr-4 text-muted">
-                        {PARTICIPANT_ROLE_LABELS[inv.participantRole]}
-                      </td>
-                      <td className="py-3 pr-4 text-muted">
-                        {inv.workPackage ?? "—"}
-                      </td>
-                      <td className="py-3 pr-4">
-                        <Badge tone={INVITATION_BADGE_TONES[inv.status]}>
-                          {INVITATION_STATUS_LABELS[inv.status]}
-                        </Badge>
-                      </td>
-                      <td className="py-3 text-right">
-                        {inv.status === "joined" ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={async () => {
-                              const r = await verifyParticipant({ data: { workspaceId: workspace.id,
-                                invitationId: inv.id, } });
-                              if (r.ok) {
-                                await onChanged(`${inv.email} verified ✓`);
-                              } else {
-                                await onChanged(r.error);
-                              }
-                            }}
-                          >
-                            Verify
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-slate-400">
-                            {inv.respondedAt
-                              ? new Date(inv.respondedAt).toLocaleDateString()
-                              : "Awaiting response"}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-5 flex flex-col gap-4">
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                <Badge tone="blue">{counts.invited} invited</Badge>
+                <Badge tone="teal">{counts.joined} joined</Badge>
+                <Badge tone="green">{counts.verified} verified</Badge>
+                {counts.declined > 0 && (
+                  <Badge tone="red">{counts.declined} declined</Badge>
+                )}
+              </div>
+              {participants.map((p) => (
+                <ParticipantCard
+                  key={p.invitationId}
+                  workspaceId={workspace.id}
+                  p={p}
+                  onChanged={onChanged}
+                />
+              ))}
             </div>
           )}
         </Card>
       </div>
-
       <div>
         <InviteForm
           workspaceId={workspace.id}
@@ -752,6 +729,241 @@ function CompaniesTab({
         />
       </div>
     </div>
+  );
+}
+
+function ParticipantCard({
+  workspaceId,
+  p,
+  onChanged,
+}: {
+  workspaceId: string;
+  p: ParticipantVerification;
+  onChanged: (message: string) => Promise<void>;
+}) {
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-semibold text-ink">
+            {p.companyName ?? "Unnamed company"}
+          </p>
+          <p className="text-xs text-muted">{p.email}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Badge tone={INVITATION_BADGE_TONES[p.inviteStatus]}>
+            {INVITATION_STATUS_LABELS[p.inviteStatus]}
+          </Badge>
+          <Badge tone={VERIFICATION_BADGE_TONES[p.verificationStatus]}>
+            {VERIFICATION_LABELS[p.verificationStatus]}
+          </Badge>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <span>Role: {PARTICIPANT_ROLE_LABELS[p.participantRole]}</span>
+        <span>Package: {p.workPackage ?? "—"}</span>
+        {p.verifiedAt && (
+          <span>Verified {new Date(p.verifiedAt).toLocaleDateString()}</span>
+        )}
+      </div>
+      {p.verificationDocuments.length > 0 && (
+        <ul className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
+          {p.verificationDocuments.map((d) => (
+            <VerificationDocRow
+              key={d.id}
+              workspaceId={workspaceId}
+              doc={d}
+              onChanged={onChanged}
+            />
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+        <p className="text-xs text-muted">{verificationOutstanding(p)}</p>
+        {p.inviteStatus === "joined" && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={verifyBusy}
+            onClick={async () => {
+              setVerifyBusy(true);
+              const r = await verifyParticipant({
+                data: { workspaceId, invitationId: p.invitationId },
+              });
+              setVerifyBusy(false);
+              if (r.ok) {
+                await onChanged(`${p.email} verified ✓`);
+              } else {
+                await onChanged(r.error);
+              }
+            }}
+          >
+            {verifyBusy ? "Verifying…" : "Verify company"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VerificationDocRow({
+  workspaceId,
+  doc,
+  onChanged,
+}: {
+  workspaceId: string;
+  doc: ParticipantVerification["verificationDocuments"][number];
+  onChanged: (message: string) => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<"approved" | "needs_changes" | null>(null);
+  async function review(decision: "approved" | "needs_changes") {
+    setBusy(decision);
+    const r = await reviewVerificationDocument({
+      data: { workspaceId, documentId: doc.id, decision, note },
+    });
+    setBusy(null);
+    if (r.ok) {
+      setNote("");
+      await onChanged(
+        decision === "approved"
+          ? `“${doc.name}” approved ✓`
+          : `Changes requested on “${doc.name}”`,
+      );
+    } else {
+      await onChanged(r.error);
+    }
+  }
+  return (
+    <li className="flex flex-col gap-2 rounded-lg bg-mist/60 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">
+            {doc.name}
+            {doc.fileUrl && (
+              <a
+                href={doc.fileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-1.5 text-xs font-semibold text-brand hover:underline"
+              >
+                ↗
+              </a>
+            )}
+          </p>
+          <p className="text-xs text-muted">
+            Submitted {new Date(doc.uploadedAt).toLocaleDateString()} by{" "}
+            {doc.uploadedByEmail ?? "the company"}
+          </p>
+          {doc.reviewComment && (
+            <p className="mt-0.5 text-xs italic text-muted">
+              Lead note: {doc.reviewComment}
+            </p>
+          )}
+        </div>
+        <Badge
+          tone={
+            CLIENT_DOCUMENT_STATUS_TONES[
+              doc.status as ClientDocumentStatus
+            ] ?? "slate"
+          }
+        >
+          {CLIENT_DOCUMENT_STATUS_LABELS[doc.status as ClientDocumentStatus] ??
+            doc.status}
+        </Badge>
+      </div>
+      {doc.status === "under_review" && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note for the company (optional)…"
+            maxLength={2000}
+            className="sm:max-w-xs"
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => review("approved")}
+            >
+              {busy === "approved" ? "…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy !== null}
+              onClick={() => review("needs_changes")}
+            >
+              {busy === "needs_changes" ? "…" : "Request changes"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function YourVerificationCard({
+  participants,
+}: {
+  participants: ParticipantVerification[];
+}) {
+  const mine = participants.find(
+    (p) => p.verificationStatus !== undefined && p.inviteStatus !== "declined",
+  );
+  if (!mine) {
+    return (
+      <Card className="p-8 text-center">
+        <p className="text-sm text-muted">
+          The participant list is private to the lead contractor — other
+          companies' details are never shared across the workspace.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold">Your company verification</h2>
+        <Badge tone={VERIFICATION_BADGE_TONES[mine.verificationStatus]}>
+          {VERIFICATION_LABELS[mine.verificationStatus]}
+        </Badge>
+      </div>
+      <p className="mt-1 text-sm text-muted">
+        Where your company sits in the lead's verification pipeline for this
+        workspace.
+      </p>
+      <div className="mt-4 flex flex-col gap-2">
+        {mine.verificationDocuments.map((d) => (
+          <div
+            key={d.id}
+            className="flex items-center justify-between gap-2 rounded-lg bg-mist/60 px-3 py-2"
+          >
+            <span className="text-sm font-medium text-ink">{d.name}</span>
+            <Badge
+              tone={
+                CLIENT_DOCUMENT_STATUS_TONES[
+                  d.status as ClientDocumentStatus
+                ] ?? "slate"
+              }
+            >
+              {CLIENT_DOCUMENT_STATUS_LABELS[d.status as ClientDocumentStatus] ??
+                d.status}
+            </Badge>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-sm text-muted">
+        {verificationOutstanding(mine)}
+      </p>
+      <p className="mt-2 text-xs text-muted">
+        Submit verification documents (licences, insurance, certificates) from
+        the Documents tab — choose “Verification” as the type. The lead reviews
+        them here.
+      </p>
+    </Card>
   );
 }
 
@@ -2580,6 +2792,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "invitation.accept": "Invitation accepted",
   "invitation.decline": "Invitation declined",
   "invitation.verify": "Participant verified",
+  "document.review": "Verification document reviewed",
   "document.create": "Document added",
   "task.create": "Task created",
   "task.update": "Task updated",

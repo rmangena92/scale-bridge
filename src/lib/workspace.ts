@@ -18,6 +18,7 @@ import {
   doCreateVariation,
   doCreateWorkPackage,
   doCreateWorkspace,
+  doReviewVerificationDocument,
   doDeleteWorkPackage,
   doGetMyInvitations,
   doGetMyNotifications,
@@ -107,6 +108,25 @@ export const verifyParticipant = createServerFn({ method: "POST" })
       d as { workspaceId: string; invitationId: string },
   )
   .handler(({ data }) => doVerifyParticipant(data.workspaceId, data.invitationId));
+
+export const reviewVerificationDocument = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        workspaceId: string;
+        documentId: string;
+        decision: "approved" | "needs_changes";
+        note: string;
+      },
+  )
+  .handler(({ data }) =>
+    doReviewVerificationDocument(
+      data.workspaceId,
+      data.documentId,
+      data.decision,
+      data.note,
+    ),
+  );
 
 export const addDocument = createServerFn({ method: "POST" })
   .validator(

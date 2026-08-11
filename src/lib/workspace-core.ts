@@ -11,16 +11,19 @@ import { randomUUID } from "node:crypto";
 import { asService, asUser, dbConfigured, ensureSchema } from "./db";
 import type { Tx, TxQuery } from "./db";
 import { auditQuery } from "./audit";
-import { loadSessionUser } from "./auth-core";
+import { hashPassword, loadSessionUser } from "./auth-core";
 import type {
   AuditDetails,
   AuditEntry,
+  CompanyVerificationStatus,
   DocumentInput,
   DocumentVisibility,
   InvitationResponse,
+  InvitationStatus,
   InviteInput,
   MilestoneStatus,
   ParticipantRole,
+  ParticipantVerification,
   PublicDocument,
   PublicInvitation,
   PublicInvoice,
@@ -33,6 +36,7 @@ import type {
   PublicWorkspace,
   TaskInput,
   TaskStatus,
+  VerificationDocument,
   WorkspaceCompany,
   WorkspaceInput,
   WorkspaceStatus,
@@ -69,6 +73,7 @@ export type WorkspaceDetailResult =
       pricingSubmissions: PublicPricingSubmission[];
       invoices: PublicInvoice[];
       variations: PublicVariation[];
+      participantVerifications: ParticipantVerification[];
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -241,6 +246,21 @@ export async function doUpdateWorkspace(
   }
 }
 
+/** Map the participant pipeline (invited → joined → verified) onto the
+ * platform's company verification vocabulary for display in the workspace:
+ * invited → unverified, joined → pending, verified → verified. Declined stays
+ * unverified (with the declined invite badge shown in the UI). */
+function deriveVerificationStatus(status: InvitationStatus): CompanyVerificationStatus {
+  switch (status) {
+    case "verified":
+      return "verified";
+    case "joined":
+      return "pending";
+    default:
+      return "unverified";
+  }
+}
+
 // ------------------------------------------------------------- workspace detail
 export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDetailResult> {
   if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
@@ -364,6 +384,29 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
            and exists (select 1 from contract_workspaces cw where cw.id = v.workspace_id
              and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i3 where i3.workspace_id = cw.id and lower(i3.email) = lower(${user.email}) and i3.status in ('invited','joined','verified'))))
          order by v.created_at desc`,
+      // Participant verification: every invitation in the workspace with the
+      // caller's own row included for participants (so a company user can see
+      // their own verification status). The lead sees all; RLS scopes the rest.
+      tx`select i.id as invitation_id, i.email, i.company_name, i.participant_role,
+                i.work_package, i.status as invite_status, i.company_id,
+                i.responded_at, i.verified_at
+         from invitations i
+         where i.workspace_id = ${workspaceId}
+           and (exists (select 1 from contract_workspaces cw where cw.id = i.workspace_id and cw.lead_contractor_id = ${user.id})
+                or lower(i.email) = lower(${user.email}))
+         order by i.created_at desc`,
+      // Verification documents (category 'verification') in the workspace: the
+      // lead sees all; a participant sees the ones they uploaded. No companies
+      // join — the lead cannot read unverified companies (RLS) so documents are
+      // linked to participants by uploader email instead.
+      tx`select d.id, d.name, d.status, d.file_url, d.review_comment,
+                d.uploaded_at, d.uploaded_by, u.email as uploaded_by_email
+         from documents d
+         left join users u on u.id = d.uploaded_by
+         where d.workspace_id = ${workspaceId} and d.category = 'verification'
+           and (exists (select 1 from contract_workspaces cw where cw.id = d.workspace_id and cw.lead_contractor_id = ${user.id})
+                or d.uploaded_by = ${user.id})
+         order by d.created_at asc`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -514,6 +557,28 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       work_package_name: string | null;
       submitted_by_email: string | null;
       decided_by_email: string | null;
+    }[];
+
+    const participantInvRows = detailRows[12] as {
+      invitation_id: string;
+      email: string;
+      company_name: string | null;
+      participant_role: ParticipantRole;
+      work_package: string | null;
+      invite_status: InvitationStatus;
+      company_id: string | null;
+      responded_at: string | null;
+      verified_at: string | null;
+    }[];
+    const verificationDocRows = detailRows[13] as {
+      id: string;
+      name: string;
+      status: string;
+      file_url: string | null;
+      review_comment: string | null;
+      uploaded_at: string;
+      uploaded_by: string | null;
+      uploaded_by_email: string | null;
     }[];
 
     const ws = wsRows[0];
@@ -685,6 +750,39 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
         }))
       : [];
 
+    // Participant verification (lead view): every invitation with its derived
+    // verification status (invited → unverified, joined → pending, verified →
+    // verified) plus the verification documents the company submitted, linked
+    // by uploader email. Participants only ever see their own row.
+    const verificationDocs: VerificationDocument[] = verificationDocRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      fileUrl: r.file_url,
+      reviewComment: r.review_comment,
+      uploadedByEmail: r.uploaded_by_email,
+      uploadedAt: String(r.uploaded_at),
+    }));
+    const participantVerifications: ParticipantVerification[] = participantInvRows.map(
+      (r) => ({
+        invitationId: r.invitation_id,
+        email: r.email,
+        companyName: r.company_name,
+        participantRole: r.participant_role,
+        workPackage: r.work_package,
+        inviteStatus: r.invite_status,
+        respondedAt: r.responded_at ? String(r.responded_at) : null,
+        verifiedAt: r.verified_at ? String(r.verified_at) : null,
+        companyId: r.company_id,
+        verificationStatus: deriveVerificationStatus(r.invite_status),
+        verificationDocuments: verificationDocs.filter(
+          (d) =>
+            d.uploadedByEmail != null &&
+            d.uploadedByEmail.toLowerCase() === r.email.toLowerCase(),
+        ),
+      }),
+    );
+
     return {
       ok: true,
       workspace: {
@@ -710,6 +808,7 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       pricingSubmissions,
       invoices,
       variations,
+      participantVerifications,
     };
   } catch (err) {
     console.error("getWorkspace failed:", err);
@@ -1001,6 +1100,94 @@ export async function doVerifyParticipant(
   }
 }
 
+export type VerificationReviewDecision = "approved" | "needs_changes";
+
+/**
+ * Lead review of a participating company's verification document: approve it
+ * (company moves toward verified) or request changes (status back to
+ * 'needs_changes' with a note). Lead-only. Writes documents.status +
+ * review metadata, audits, and notifies the submitting company user.
+ */
+export async function doReviewVerificationDocument(
+  workspaceId: string,
+  documentId: string,
+  decision: VerificationReviewDecision,
+  note: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  if (decision !== "approved" && decision !== "needs_changes") {
+    return { ok: false, error: "Invalid review decision." };
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can review verification documents." };
+    }
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select d.id, d.name, d.status, d.uploaded_by
+         from documents d
+         where d.id = ${documentId} and d.workspace_id = ${workspaceId}
+           and d.category = 'verification'`,
+    ]))[1] as { id: string; name: string; status: string; uploaded_by: string | null }[];
+    const doc = rows[0];
+    if (!doc) {
+      return { ok: false, error: "Verification document not found in this workspace." };
+    }
+    if (doc.status === decision) {
+      return { ok: false, error: `This document is already ${decision === "approved" ? "approved" : "marked as needing changes"}.` };
+    }
+
+    const cleanNote = cleanText(note, 2000);
+    await asUser(user.id, user.role, (tx) => [
+      tx`update documents
+         set status = ${decision},
+             review_comment = ${cleanNote || null},
+             reviewed_by = ${user.id},
+             reviewed_at = now(),
+             updated_at = now()
+         where id = ${documentId} and workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw
+                       where cw.id = documents.workspace_id and cw.lead_contractor_id = ${user.id})`,
+      // Notify the submitting company user (if a different user than the lead).
+      ...(doc.uploaded_by && doc.uploaded_by !== user.id
+        ? [
+            notifyQuery(
+              tx,
+              doc.uploaded_by,
+              workspaceId,
+              "verification.review",
+              decision === "approved"
+                ? "Verification document approved"
+                : "Verification document needs changes",
+              `Your document “${doc.name}” on “${ws.title}” was ${
+                decision === "approved" ? "approved" : "marked as needing changes"
+              }.${cleanNote ? ` Note: ${cleanNote}` : ""}`,
+              `/workspaces/${workspaceId}?tab=companies`,
+            ),
+          ]
+        : []),
+      auditQuery(tx, user.id, "document.review", {
+        workspaceId,
+        documentId,
+        name: doc.name,
+        decision,
+        note: cleanNote || null,
+        previousStatus: doc.status,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("reviewVerificationDocument failed:", err);
+    return { ok: false, error: "Could not review the verification document." };
+  }
+}
+
 // ----------------------------------------------------------- delivery tabs
 // Documents / tasks / milestones for the lead-contractor workspace tabs.
 // Every function: verify the actor can access the workspace (lead or an
@@ -1060,11 +1247,26 @@ export async function doAddDocument(
       user.id === ws.leadContractorId ? visibility : "workspace";
 
     const documentId = randomUUID();
+    // Verification documents submitted by a participating company start
+    // 'under_review' (the lead reviews them in the Companies tab); everything
+    // else (including lead uploads) is 'published'.
+    const isVerification = category === "verification";
+    const status =
+      isVerification && user.id !== ws.leadContractorId ? "under_review" : "published";
     await asUser(user.id, user.role, (tx) => [
       tx`insert into documents
            (id, workspace_id, lead_contractor_id, name, category, visibility, file_url, uploaded_by, status, created_at, updated_at)
          values (${documentId}, ${workspaceId}, ${ws.leadContractorId}, ${name}, ${category},
-                 ${effectiveVisibility}, ${url}, ${user.id}, 'published', now(), now())`,
+                 ${effectiveVisibility}, ${url}, ${user.id}, ${status}, now(), now())`,
+      // Submitting a verification document nudges the company's own profile
+      // from unverified → pending (owner-scoped update; RLS allows the owner).
+      ...(isVerification && user.id !== ws.leadContractorId
+        ? [
+            tx`update companies
+               set verification_status = 'pending', updated_at = now()
+               where owner_id = ${user.id} and verification_status = 'unverified'`,
+          ]
+        : []),
       auditQuery(tx, user.id, "document.create", {
         workspaceId,
         documentId,
@@ -1074,6 +1276,8 @@ export async function doAddDocument(
         url: url ?? null,
         description: description ?? null,
         accessNote: accessNote ?? null,
+        verification: isVerification || null,
+        status,
       }),
     ]);
     return { ok: true };
@@ -1718,6 +1922,140 @@ export async function doGetMyNotifications(): Promise<NotificationsResult> {
 }
 
 // ------------------------------------------------------------------ demo seed
+// Verification demo block: three participating companies for the demo
+// workspace, one per verification stage — Meridian (verified, approved
+// document), Clearview (pending, document awaiting review), Northgate
+// (unverified, no documents). Participant user accounts are created so the
+// company side is genuinely demoable (login password: demo-password).
+const DEMO_PARTICIPANT_PASSWORD = "demo-password";
+const DEMO_PARTICIPANTS: {
+  email: string;
+  companyName: string;
+  inviteStatus: "invited" | "joined" | "verified";
+  companyVerificationStatus: CompanyVerificationStatus;
+  document: { name: string; status: string; comment: string | null } | null;
+}[] = [
+  {
+    email: "bids@meridianhvac.com",
+    companyName: "Meridian HVAC Ltd.",
+    inviteStatus: "verified",
+    companyVerificationStatus: "verified",
+    document: {
+      name: "HVAC Contractor Licence — 2026",
+      status: "approved",
+      comment: "Current licence verified for the Riverside Plaza HVAC package.",
+    },
+  },
+  {
+    email: "ops@clearviewcleaning.com",
+    companyName: "Clearview Cleaning",
+    inviteStatus: "joined",
+    companyVerificationStatus: "pending",
+    document: {
+      name: "Cleaning Licence (BICSc) — 2026",
+      status: "under_review",
+      comment: null,
+    },
+  },
+  {
+    email: "tenders@northgatesecurity.com",
+    companyName: "Northgate Security",
+    inviteStatus: "invited",
+    companyVerificationStatus: "unverified",
+    document: null,
+  },
+];
+
+/**
+ * Idempotent demo block: participant companies with verification statuses +
+ * verification documents for the demo workspace. Creates the participant user
+ * accounts (users is RLS-exempt), then their profile + company via an
+ * owner-scoped asUser (so the RLS insert/update policies pass), then links and
+ * advances the invitations and seeds the documents as the workspace lead.
+ * Runs only when the workspace has no verification documents yet.
+ */
+async function ensureVerificationDemo(
+  lead: { id: string; role: string },
+  wsId: string,
+): Promise<void> {
+  const probe = (await asUser(lead.id, lead.role, (tx) => [
+    tx`select count(*)::int as n from documents
+       where workspace_id = ${wsId} and category = 'verification'`,
+  ]))[1] as { n: number }[];
+  if ((probe[0]?.n ?? 0) > 0) return; // already seeded
+
+  for (const p of DEMO_PARTICIPANTS) {
+    // 1. Participant user account (RLS-exempt users table, like signup).
+    const userId = randomUUID();
+    await asService((tx) => [
+      tx`insert into users (id, email, password_hash)
+         values (${userId}, ${p.email}, ${hashPassword(DEMO_PARTICIPANT_PASSWORD)})
+         on conflict (email) do nothing`,
+    ]);
+    const userRows = (await asService((tx) => [
+      tx`select id from users where lower(email) = lower(${p.email})`,
+    ]))[0] as { id: string }[];
+    const participantId = userRows[0].id;
+
+    // 2. Profile + company, scoped AS the participant so RLS passes (they own
+    // their profile and company; the owner may also set verification_status).
+    const companyId = randomUUID();
+    await asUser(participantId, "company_user", (tx) => [
+      tx`insert into profiles (user_id, role, name)
+         values (${participantId}, 'company_user', ${p.companyName})
+         on conflict (user_id) do nothing`,
+      tx`insert into companies (id, owner_id, name, verification_status)
+         values (${companyId}, ${participantId}, ${p.companyName}, ${p.companyVerificationStatus})
+         on conflict (owner_id) do nothing`,
+      tx`update companies
+         set verification_status = ${p.companyVerificationStatus}, updated_at = now()
+         where owner_id = ${participantId}`,
+    ]);
+
+    // 3. Link + advance the invitation, seed the verification document, all as
+    // the workspace lead (lead-owned invitation/document writes).
+    await asUser(lead.id, lead.role, (tx) => {
+      const qs: TxQuery[] = [];
+      // Remove stray duplicate invitations for this email that already carry a
+      // company link (legacy demo leftovers) — keep one canonical row.
+      qs.push(tx`delete from invitations
+                 where workspace_id = ${wsId}
+                   and lower(email) = lower(${p.email})
+                   and company_id is not null
+                   and status = 'invited'`);
+      qs.push(tx`update invitations
+                 set company_id = ${companyId},
+                     status = ${p.inviteStatus},
+                     responded_at = ${p.inviteStatus === "invited" ? null : new Date()},
+                     joined_at = ${p.inviteStatus === "joined" || p.inviteStatus === "verified" ? new Date() : null},
+                     verified_at = ${p.inviteStatus === "verified" ? new Date() : null},
+                     updated_at = now()
+                 where workspace_id = ${wsId} and lower(email) = lower(${p.email})`);
+      if (p.document) {
+        qs.push(tx`insert into documents
+             (id, workspace_id, lead_contractor_id, name, category, visibility, file_url,
+              uploaded_by, status, review_comment, reviewed_by, reviewed_at, created_at, updated_at)
+           values (${randomUUID()}, ${wsId}, ${lead.id}, ${p.document.name}, 'verification',
+                   'company_only',
+                   ${"https://demo.scalebridge.local/docs/" + p.document.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")},
+                   ${participantId}, ${p.document.status}, ${p.document.comment},
+                   ${p.document.status === "approved" ? lead.id : null},
+                   ${p.document.status === "approved" ? new Date() : null}, now(), now())`);
+      }
+      qs.push(auditQuery(tx, lead.id, "demo.seed", {
+        workspaceId: wsId,
+        verification: true,
+        participant: p.email,
+        companyVerificationStatus: p.companyVerificationStatus,
+        invitationStatus: p.inviteStatus,
+        document: p.document?.name ?? null,
+      }));
+      return qs;
+    });
+  }
+}
+
+
 // Realistic sample data for demonstration: a facilities-management contract
 // with HVAC, cleaning and security work packages and three invited companies.
 const DEMO_WORKSPACE_TITLE = "Riverside Plaza — Facilities Management";
@@ -1737,6 +2075,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       // prior seed) — idempotently add the commercial demo rows (pricing
       // submissions, one invoice, one variation) only if none exist yet.
       const wsId = existing[0].id;
+      // Verification demo block (idempotent — skips once verification docs exist).
+      await ensureVerificationDemo(user, wsId);
       const probe = (await asUser(user.id, user.role, (tx) => [
         tx`select id, name from work_packages where workspace_id = ${wsId} order by created_at asc`,
         tx`select id from pricing_submissions where workspace_id = ${wsId} limit 1`,
@@ -1885,6 +2225,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       auditQuery(tx, user.id, "workspace.create", { workspaceId: wsId, title: DEMO_WORKSPACE_TITLE, status: "active", demo: true }),
       auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3, tasks: 3, documents: 2, pricing: 2, invoices: 1, variations: 1 }),
     ]);
+    // Verification demo block (idempotent — skips once verification docs exist).
+    await ensureVerificationDemo(user, wsId);
     return { ok: true };
   } catch (err) {
     console.error("seedDemo failed:", err);

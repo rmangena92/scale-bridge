@@ -33,6 +33,16 @@ export const VERIFICATION_LABELS: Record<CompanyVerificationStatus, string> = {
   verified: "Verified",
 };
 
+/** Badge tone per company verification status (UI concern, kept here for reuse). */
+export const VERIFICATION_BADGE_TONES: Record<
+  CompanyVerificationStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  unverified: "slate",
+  pending: "amber",
+  verified: "green",
+};
+
 /** The authenticated user as returned by the session server function. */
 export type PublicUser = {
   id: string;
@@ -217,6 +227,37 @@ export type InviteInput = {
 
 export type InvitationResponse = "accept" | "decline";
 
+// ---------------------------------------------------- participant verification
+// Lead-contractor view of a participating company's verification state inside a
+// workspace. The verification STATUS is derived from the participant pipeline
+// (invited → joined → verified) because companies.verification_status is the
+// platform-level (admin/owner) record and is RLS-invisible to the lead for
+// non-verified companies; the documents are the company's submitted
+// verification documents (category 'verification') which the lead reviews.
+export type VerificationDocument = {
+  id: string;
+  name: string;
+  status: string; // documents.status ('under_review'|'approved'|'needs_changes'|…)
+  fileUrl: string | null;
+  reviewComment: string | null;
+  uploadedByEmail: string | null;
+  uploadedAt: string;
+};
+
+export type ParticipantVerification = {
+  invitationId: string;
+  email: string;
+  companyName: string | null;
+  participantRole: ParticipantRole;
+  workPackage: string | null;
+  inviteStatus: InvitationStatus;
+  respondedAt: string | null;
+  verifiedAt: string | null;
+  companyId: string | null;
+  verificationStatus: CompanyVerificationStatus;
+  verificationDocuments: VerificationDocument[];
+};
+
 // ----------------------------------------------------------- notifications
 export type PublicNotification = {
   id: string;
@@ -271,6 +312,7 @@ export const DOCUMENT_CATEGORIES = [
   "licence",
   "insurance",
   "scope",
+  "verification",
   "other",
 ] as const;
 
@@ -285,6 +327,7 @@ export const DOCUMENT_CATEGORY_LABELS: Record<DocumentCategory, string> = {
   licence: "Licence",
   insurance: "Insurance",
   scope: "Scope of works",
+  verification: "Verification",
   other: "Other",
 };
 

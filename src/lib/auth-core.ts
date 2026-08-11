@@ -47,7 +47,8 @@ const SESSION_TTL_MS = SESSION_TTL_SECS * 1000;
 // ---------------------------------------------------------------- passwords
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64, maxmem: 64 * 1024 * 1024 };
 
-function hashPassword(password: string): string {
+/** scrypt hash in "scrypt$N$r$p$saltB64$keyB64" format (see verifyPassword). */
+export function hashPassword(password: string): string {
   const salt = randomBytes(16);
   const key = scryptSync(password, salt, SCRYPT.keylen, {
     N: SCRYPT.N,

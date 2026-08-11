@@ -1,5 +1,5 @@
 import { createFileRoute, Link, redirect, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { AppShell } from "~/components/AppShell";
 import {
@@ -25,7 +25,9 @@ import {
   deleteWorkPackage,
   getWorkspace,
   inviteCompany,
+  markWorkspaceMessagesRead,
   reviewPricing,
+  sendWorkspaceMessage,
   submitPricing,
   updateInvoiceStatus,
   updateMilestoneStatus,
@@ -82,6 +84,7 @@ import type {
   PublicVariation,
   PublicUser,
   PublicWorkPackage,
+  PublicWorkspaceMessage,
   PublicWorkspace,
   TaskStatus,
   WorkspaceCompany,
@@ -136,6 +139,7 @@ const ACTIVE_TABS: TabId[] = [
   "pricing",
   "tasks",
   "milestones",
+  "messages",
   "approvals",
   "variations",
   "invoices",
@@ -230,6 +234,22 @@ function WorkspaceBody({
     const result = await getWorkspace({ data: { workspaceId: data.workspace.id } });
     if (result.ok) setData(result);
   }
+  // Mark the workspace thread read the moment the Messages tab is opened, then
+  // re-fetch so the unread badge / per-message read flags recompute. Runs once
+  // per tab switch (deps: tab + workspace id).
+  useEffect(() => {
+    if (tab !== "messages") return;
+    let cancelled = false;
+    markWorkspaceMessagesRead({ data: { workspaceId: data.workspace.id } }).then(
+      (result) => {
+        if (!cancelled && result.ok) void refresh();
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, data.workspace.id]);
 
   const {
     workspace,
@@ -244,6 +264,8 @@ function WorkspaceBody({
     invoices,
     variations,
     participantVerifications,
+    messages,
+    unreadMessageCount,
   } = data;
 
   return (
@@ -320,6 +342,11 @@ function WorkspaceBody({
               }
             >
               {TAB_LABELS[t]}
+              {t === "messages" && unreadMessageCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center rounded-full bg-brand px-1.5 py-0.5 align-middle text-[10px] font-bold leading-none text-white">
+                  {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
+                </span>
+              )}
             </button>
           );
         })}
@@ -453,6 +480,19 @@ function WorkspaceBody({
         />
       )}
       {tab === "variations" && !isLead && <CommercialPrivacyCard />}
+      {tab === "messages" && (
+        <MessagesTab
+          workspace={workspace}
+          messages={messages}
+          unreadMessageCount={unreadMessageCount}
+          isLead={isLead}
+          userId={user.id}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
       {!ACTIVE_TABS.includes(tab) && <PlaceholderTab tab={tab} />}
     </AppShell>
   );
@@ -487,6 +527,145 @@ function PlaceholderTab({ tab }: { tab: TabId }) {
         </div>
       </div>
     </Card>
+  );
+}
+// ------------------------------------------------------------- messages tab
+function MessagesTab({
+  workspace,
+  messages,
+  unreadMessageCount,
+  isLead,
+  userId,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  messages: PublicWorkspaceMessage[];
+  unreadMessageCount: number;
+  isLead: boolean;
+  userId: string;
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  // Keep the newest message in view when the thread loads or grows.
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
+  async function send(e: FormEvent) {
+    e.preventDefault();
+    if (!draft.trim() || sending) return;
+    setError(null);
+    setSending(true);
+    const result = await sendWorkspaceMessage({
+      data: { workspaceId: workspace.id, body: draft },
+    });
+    setSending(false);
+    if (result.ok) {
+      setDraft("");
+      await onChanged("Message sent.");
+    } else {
+      setError(result.error ?? "Could not send the message.");
+    }
+  }
+
+  return (
+    <Card className="flex h-[32rem] flex-col p-0">
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <div>
+          <h2 className="text-lg font-bold">Workspace chat</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            One shared thread — every participant in this workspace sees it.
+          </p>
+        </div>
+        {unreadMessageCount > 0 && (
+          <Badge tone="brand">
+            {unreadMessageCount} new
+            {unreadMessageCount === 1 ? "" : "s"}
+          </Badge>
+        )}
+      </div>
+      <div
+        ref={threadRef}
+        className="flex-1 space-y-3 overflow-y-auto bg-mist/50 px-5 py-4"
+      >
+        {messages.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted">
+            No messages yet — start the conversation.
+          </p>
+        )}
+        {messages.map((m) => (
+          <MessageBubble key={m.id} message={m} isMine={m.authorUserId === userId} />
+        ))}
+      </div>
+      <form onSubmit={send} className="border-t border-slate-200 bg-white p-4">
+        {error && <ErrorText>{error}</ErrorText>}
+        <div className="flex items-end gap-3">
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={2}
+            maxLength={4000}
+            placeholder="Type a message to the workspace…"
+            className="flex-1 resize-none"
+          />
+          <Button type="submit" disabled={sending || !draft.trim()}>
+            {sending ? "Sending…" : "Send"}
+          </Button>
+        </div>
+        <p className="mt-2 text-[11px] text-muted">
+          Messages are visible to the lead contractor and every participating
+          company{isLead ? "" : " (and the lead contractor)"} in this workspace.
+        </p>
+      </form>
+    </Card>
+  );
+}
+function MessageBubble({
+  message,
+  isMine,
+}: {
+  message: PublicWorkspaceMessage;
+  isMine: boolean;
+}) {
+  const senderName =
+    message.authorCompanyName ??
+    message.authorName ??
+    (message.isLead ? "Lead contractor" : message.authorEmail || "Participant");
+  return (
+    <div className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm ${
+          isMine
+            ? "rounded-br-sm bg-blue text-white"
+            : "rounded-bl-sm border border-slate-200 bg-white text-navy"
+        }`}
+      >
+        {!isMine && (
+          <p className="text-[11px] font-bold uppercase tracking-wide text-teal">
+            {senderName}
+            {message.isLead && (
+              <span className="ml-1.5 normal-case text-muted">
+                · lead contractor
+              </span>
+            )}
+          </p>
+        )}
+        <p className="whitespace-pre-wrap">{message.body}</p>
+        <p className={`mt-1 text-[10px] ${isMine ? "text-white/70" : "text-muted"}`}>
+          {new Date(message.createdAt).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}
+        </p>
+      </div>
+    </div>
   );
 }
 

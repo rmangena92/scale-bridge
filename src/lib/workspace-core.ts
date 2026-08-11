@@ -34,6 +34,7 @@ import type {
   PublicVariation,
   PublicWorkPackage,
   PublicWorkspace,
+  PublicWorkspaceMessage,
   TaskInput,
   TaskStatus,
   VerificationDocument,
@@ -74,6 +75,8 @@ export type WorkspaceDetailResult =
       invoices: PublicInvoice[];
       variations: PublicVariation[];
       participantVerifications: ParticipantVerification[];
+      messages: PublicWorkspaceMessage[];
+      unreadMessageCount: number;
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -407,6 +410,38 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
            and (exists (select 1 from contract_workspaces cw where cw.id = d.workspace_id and cw.lead_contractor_id = ${user.id})
                 or d.uploaded_by = ${user.id})
          order by d.created_at asc`,
+      // Workspace participant thread (Messages tab): every message in the
+      // workspace's 'general' thread with author profile/company info and the
+      // caller's read watermark. Both the lead and participants see the
+      // thread; RLS scopes it. The invitation lateral gives the company name
+      // where the caller may see it (lead sees all; a participant sees their
+      // own invitation row).
+      tx`select m.id, m.author_user_id, m.thread_key, m.body, m.created_at,
+                u.email as author_email, p.name as author_name,
+                inv.company_name as author_company,
+                (m.author_user_id = cw.lead_contractor_id) as is_lead,
+                r.last_read_at
+         from workspace_messages m
+         join contract_workspaces cw on cw.id = m.workspace_id
+         left join users u on u.id = m.author_user_id
+         left join profiles p on p.user_id = m.author_user_id
+         left join lateral (
+           select i.company_name from invitations i
+           where i.workspace_id = m.workspace_id and lower(i.email) = lower(u.email)
+             and i.status in ('joined','verified')
+           limit 1
+         ) inv on true
+         left join workspace_message_reads r
+           on r.workspace_id = m.workspace_id and r.thread_key = m.thread_key
+          and r.user_id = ${user.id}
+         where m.workspace_id = ${workspaceId}
+           and (cw.lead_contractor_id = ${user.id} or exists (
+             select 1 from invitations i
+             where i.workspace_id = cw.id
+               and lower(i.email) = lower(${user.email})
+               and i.status in ('invited','joined','verified')
+           ))
+         order by m.created_at asc, m.id asc`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -579,6 +614,18 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       uploaded_at: string;
       uploaded_by: string | null;
       uploaded_by_email: string | null;
+    }[];
+    const messageRows = detailRows[14] as {
+      id: string;
+      author_user_id: string;
+      thread_key: string;
+      body: string;
+      created_at: string;
+      author_email: string | null;
+      author_name: string | null;
+      author_company: string | null;
+      is_lead: boolean;
+      last_read_at: string | null;
     }[];
 
     const ws = wsRows[0];
@@ -783,6 +830,20 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       }),
     );
 
+    const messages: PublicWorkspaceMessage[] = messageRows.map((r) => ({
+      id: r.id,
+      authorUserId: r.author_user_id,
+      body: r.body,
+      createdAt: String(r.created_at),
+      authorName: r.author_name,
+      authorEmail: r.author_email ?? "",
+      authorCompanyName: r.author_company ?? null,
+      isLead: r.is_lead,
+      read:
+        r.last_read_at != null &&
+        new Date(r.created_at).getTime() <= new Date(r.last_read_at).getTime(),
+    }));
+    const unreadMessageCount = messages.filter((m) => !m.read).length;
     return {
       ok: true,
       workspace: {
@@ -809,6 +870,8 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       invoices,
       variations,
       participantVerifications,
+      messages,
+      unreadMessageCount,
     };
   } catch (err) {
     console.error("getWorkspace failed:", err);
@@ -1921,6 +1984,116 @@ export async function doGetMyNotifications(): Promise<NotificationsResult> {
   }
 }
 
+// ------------------------------------------------------- workspace messaging
+// Messages tab: one shared 'general' thread per workspace, seen by the lead
+// and the invited/joined/verified participants. Read tracking uses a per-user
+// watermark (workspace_message_reads) mirroring the client portal pattern.
+
+const WORKSPACE_MESSAGE_MAX = 4000;
+
+export async function doSendWorkspaceMessage(
+  workspaceId: string,
+  body: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const text = body.trim().slice(0, WORKSPACE_MESSAGE_MAX);
+  if (!text) return { ok: false, error: "Message cannot be empty." };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+
+    // The sender's invitation status decides whether the notifications insert
+    // policy lets us notify the other side (an invitee may only notify the
+    // lead once joined/verified; a lead may notify anyone they invited).
+    const invRows = (await asUser(user.id, user.role, (tx) => [
+      tx`select status from invitations
+         where workspace_id = ${workspaceId} and lower(email) = lower(${user.email})`,
+    ]))[1] as { status: string }[];
+    const myStatus = invRows[0]?.status ?? null;
+
+    // Recipients for the "new message" notification. Lead → every joined /
+    // verified participant with an account; participant (joined/verified) →
+    // the workspace lead.
+    let notifyUserIds: string[] = [];
+    if (user.id === ws.leadContractorId) {
+      const pRows = (await asUser(user.id, user.role, (tx) => [
+        tx`select u.id from invitations i
+           join users u on lower(u.email) = lower(i.email)
+           where i.workspace_id = ${workspaceId}
+             and i.status in ('joined','verified')`,
+      ]))[1] as { id: string }[];
+      notifyUserIds = pRows.map((r) => r.id);
+    } else if (myStatus === "joined" || myStatus === "verified") {
+      notifyUserIds = [ws.leadContractorId];
+    }
+
+    const messageId = randomUUID();
+    const linkHref = `/workspaces/${workspaceId}?tab=messages`;
+    const title = ws.title;
+    await asUser(user.id, user.role, (tx) => {
+      const qs: TxQuery[] = [
+        tx`insert into workspace_messages (id, workspace_id, thread_key, author_user_id, body)
+           values (${messageId}, ${workspaceId}, 'general', ${user.id}, ${text})`,
+        // The author has read the thread up to their own message.
+        tx`insert into workspace_message_reads (workspace_id, thread_key, user_id, last_read_at)
+           values (${workspaceId}, 'general', ${user.id}, now())
+           on conflict (workspace_id, thread_key, user_id) do update set last_read_at = now()`,
+      ];
+      for (const uid of notifyUserIds) {
+        qs.push(
+          tx`insert into notifications (user_id, workspace_id, type, title, body, link)
+             values (${uid}, ${workspaceId}, 'new_workspace_message',
+                     ${`New message on ${title}`}, ${text.slice(0, 120)}, ${linkHref})`,
+        );
+      }
+      qs.push(
+        auditQuery(tx, user.id, "workspace.message.send", {
+          workspaceId,
+          messageId,
+          threadKey: "general",
+        }, workspaceId),
+      );
+      return qs;
+    });
+    return { ok: true };
+  } catch (err) {
+    console.error("sendWorkspaceMessage failed:", err);
+    return { ok: false, error: "Could not send the message." };
+  }
+}
+
+export async function doMarkWorkspaceMessagesRead(
+  workspaceId: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into workspace_message_reads (workspace_id, thread_key, user_id, last_read_at)
+         values (${workspaceId}, 'general', ${user.id}, now())
+         on conflict (workspace_id, thread_key, user_id) do update set last_read_at = now()`,
+      auditQuery(tx, user.id, "workspace.message.mark_read", {
+        workspaceId,
+        threadKey: "general",
+      }, workspaceId),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("markWorkspaceMessagesRead failed:", err);
+    return { ok: false, error: "Could not update read state." };
+  }
+}
+
 // ------------------------------------------------------------------ demo seed
 // Verification demo block: three participating companies for the demo
 // workspace, one per verification stage — Meridian (verified, approved
@@ -2054,6 +2227,56 @@ async function ensureVerificationDemo(
     });
   }
 }
+/**
+ * Idempotent demo block: the workspace participant thread for the demo
+ * workspace — a Q3 HVAC scope exchange between the lead and the Meridian
+ * account (bids@meridianhvac.com), plus read watermarks so the lead still has
+ * one unread message (the tab badge demo) and Meridian has read everything.
+ * Runs only when the workspace has no workspace_messages yet.
+ */
+async function ensureMessagesDemo(
+  lead: { id: string; role: string },
+  wsId: string,
+): Promise<void> {
+  const probe = (await asUser(lead.id, lead.role, (tx) => [
+    tx`select count(*)::int as n from workspace_messages where workspace_id = ${wsId}`,
+  ]))[1] as { n: number }[];
+  if ((probe[0]?.n ?? 0) > 0) return; // already seeded
+  const userRows = (await asService((tx) => [
+    tx`select id from users where lower(email) = 'bids@meridianhvac.com'`,
+  ]))[0] as { id: string }[];
+  const meridianId = userRows[0]?.id;
+  if (!meridianId) return; // participant account not created yet — skip
+  await asUser(lead.id, lead.role, (tx) => [
+    tx`insert into workspace_messages (id, workspace_id, thread_key, author_user_id, body, created_at)
+       values (${randomUUID()}, ${wsId}, 'general', ${lead.id},
+               ${"Morning — before we lock the Q3 schedule, can you confirm the AHU-1 filter-change window? I'd like it done ahead of the client's board meeting on the 12th."},
+               now() - interval '2 days')`,
+    tx`insert into workspace_messages (id, workspace_id, thread_key, author_user_id, body, created_at)
+       values (${randomUUID()}, ${wsId}, 'general', ${meridianId},
+               ${"We can take AHU-1 on the morning of 10 September: isolate the unit, replace both filter banks, pressure-test, then log the readings on the BMS. That clears the board meeting and fits our Q3 rota."},
+               now() - interval '26 hours')`,
+    tx`insert into workspace_messages (id, workspace_id, thread_key, author_user_id, body, created_at)
+       values (${randomUUID()}, ${wsId}, 'general', ${lead.id},
+               ${"Confirmed — thank you. Please raise the service report the same day and we'll approve it here in the workspace."},
+               now() - interval '2 hours')`,
+    // Read watermarks: the lead has read up to the Meridian reply (so the
+    // final confirmation still shows unread → tab badge demo).
+    tx`insert into workspace_message_reads (workspace_id, thread_key, user_id, last_read_at)
+       values (${wsId}, 'general', ${lead.id}, now() - interval '26 hours')`,
+    auditQuery(tx, lead.id, "demo.seed", {
+      workspaceId: wsId,
+      messages: 3,
+      thread: "general",
+    }),
+  ]);
+  // Meridian's watermark is written AS Meridian (workspace_message_reads RLS
+  // is self-only — the lead cannot write another user's read watermark).
+  await asUser(meridianId, "company_user", (tx) => [
+    tx`insert into workspace_message_reads (workspace_id, thread_key, user_id, last_read_at)
+       values (${wsId}, 'general', ${meridianId}, now() - interval '2 hours')`,
+  ]);
+}
 
 
 // Realistic sample data for demonstration: a facilities-management contract
@@ -2077,6 +2300,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       const wsId = existing[0].id;
       // Verification demo block (idempotent — skips once verification docs exist).
       await ensureVerificationDemo(user, wsId);
+      // Messages demo block (idempotent — skips once the thread exists).
+      await ensureMessagesDemo(user, wsId);
       const probe = (await asUser(user.id, user.role, (tx) => [
         tx`select id, name from work_packages where workspace_id = ${wsId} order by created_at asc`,
         tx`select id from pricing_submissions where workspace_id = ${wsId} limit 1`,
@@ -2227,6 +2452,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
     ]);
     // Verification demo block (idempotent — skips once verification docs exist).
     await ensureVerificationDemo(user, wsId);
+    // Messages demo block (idempotent — skips once the thread exists).
+    await ensureMessagesDemo(user, wsId);
     return { ok: true };
   } catch (err) {
     console.error("seedDemo failed:", err);

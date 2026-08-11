@@ -25,6 +25,8 @@ import {
   doGetWorkspace,
   doGetWorkspaces,
   doInviteCompany,
+  doMarkWorkspaceMessagesRead,
+  doSendWorkspaceMessage,
   doRespondToInvitation,
   doReviewPricing,
   doSeedDemo,
@@ -204,6 +206,12 @@ export const updateVariationStatus = createServerFn({ method: "POST" })
   )
   .handler(({ data }) => doUpdateVariationStatus(data.workspaceId, data.variationId, data.status));
 
+export const sendWorkspaceMessage = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { workspaceId: string; body: string })
+  .handler(({ data }) => doSendWorkspaceMessage(data.workspaceId, data.body));
+export const markWorkspaceMessagesRead = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { workspaceId: string })
+  .handler(({ data }) => doMarkWorkspaceMessagesRead(data.workspaceId));
 export const seedDemoData = createServerFn({ method: "POST" }).handler(() =>
   doSeedDemo(),
 );

@@ -391,6 +391,33 @@ export const SCHEMA_SQL: string[] = [
     last_read_at timestamptz not null default now(),
     primary key (workspace_id, thread_key, user_id)
   )`,
+  // Lead-contractor workspace participant messaging (workspace Messages tab).
+  // One 'general' thread per workspace, shared by the workspace lead and the
+  // invited companies. This deliberately lives in its own table rather than
+  // the client<->lead `messages` table: the messages RLS policies grant the
+  // linked client org + the lead only, and cannot be extended to company
+  // participants without changing them — so workspace participant threads get
+  // their own table + policies (lead or invited/joined/verified participant,
+  // acyclic via contract_workspaces -> invitations -> users). Immutable rows.
+  `create table if not exists workspace_messages (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    thread_key text not null default 'general',
+    author_user_id uuid not null references users(id) on delete cascade,
+    body text not null,
+    created_at timestamptz not null default now()
+  )`,
+  // Per-user read watermark for the workspace thread (same semantics as
+  // message_reads: unread = messages newer than last_read_at). Separate table
+  // so it never collides with the client portal's message_reads rows (which
+  // share the same workspace_id/thread_key primary key namespace).
+  `create table if not exists workspace_message_reads (
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    thread_key text not null default 'general',
+    user_id uuid not null references users(id) on delete cascade,
+    last_read_at timestamptz not null default now(),
+    primary key (workspace_id, thread_key, user_id)
+  )`,
   // Part C (idempotent): client-org scoping on the notification inbox so the
   // client portal lists/marks only its org's notifications. Rows created by
   // client-scoped server fns (new-message to the lead) and the demo seed set
@@ -660,6 +687,8 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists messages_workspace_thread_idx on messages (workspace_id, thread_key, created_at)`,
   `create index if not exists messages_thread_author_idx on messages (thread_key, author_user_id)`,
   `create index if not exists message_reads_user_idx on message_reads (user_id)`,
+  `create index if not exists workspace_messages_ws_idx on workspace_messages (workspace_id, thread_key, created_at)`,
+  `create index if not exists workspace_message_reads_user_idx on workspace_message_reads (user_id)`,
   `create index if not exists audit_logs_workspace_id_idx on audit_logs (workspace_id)`,
   `create index if not exists audit_logs_actor_id_idx on audit_logs (actor_id)`,
   `create index if not exists admin_roles_user_id_idx on admin_roles (user_id)`,
@@ -745,6 +774,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table company_notes enable row level security`,
   `alter table messages enable row level security`,
   `alter table message_reads enable row level security`,
+  `alter table workspace_messages enable row level security`,
+  `alter table workspace_message_reads enable row level security`,
   `alter table admin_roles force row level security`,
   `alter table client_organizations force row level security`,
   `alter table client_org_members force row level security`,
@@ -762,6 +793,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table company_notes force row level security`,
   `alter table messages force row level security`,
   `alter table message_reads force row level security`,
+  `alter table workspace_messages force row level security`,
+  `alter table workspace_message_reads force row level security`,
   `alter table service_categories enable row level security`,
   `alter table services enable row level security`,
   `alter table company_services enable row level security`,
@@ -1313,6 +1346,61 @@ export const SCHEMA_SQL: string[] = [
     message_reads.user_id = ${UID} or ${IS_ADMIN}
   ) with check (
     message_reads.user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  // --- workspace_messages: workspace participant thread. Read/write for the
+  // workspace lead and anyone with an invited/joined/verified invitation in
+  // that workspace; sb_admin sees all. Messages are immutable. Policy edges:
+  // workspace_messages -> contract_workspaces and -> invitations, both
+  // acyclic (neither references workspace_messages).
+  `drop policy if exists workspace_messages_select on workspace_messages`,
+  `create policy workspace_messages_select on workspace_messages for select using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = workspace_messages.workspace_id
+        and cw.lead_contractor_id = ${UID}
+    )
+    or exists (
+      select 1 from invitations i
+      where i.workspace_id = workspace_messages.workspace_id
+        and i.status in ('invited','joined','verified')
+        and lower(i.email) = (
+          select lower(u.email) from users u where u.id = ${UID}
+        )
+    )
+  )`,
+  `drop policy if exists workspace_messages_insert on workspace_messages`,
+  `create policy workspace_messages_insert on workspace_messages for insert with check (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = workspace_messages.workspace_id
+        and cw.lead_contractor_id = ${UID}
+    )
+    or exists (
+      select 1 from invitations i
+      where i.workspace_id = workspace_messages.workspace_id
+        and i.status in ('invited','joined','verified')
+        and lower(i.email) = (
+          select lower(u.email) from users u where u.id = ${UID}
+        )
+    )
+  )`,
+  // --- workspace_message_reads: per-user read watermarks (self-only, mirrors
+  // message_reads).
+  `drop policy if exists workspace_message_reads_select on workspace_message_reads`,
+  `create policy workspace_message_reads_select on workspace_message_reads for select using (
+    workspace_message_reads.user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists workspace_message_reads_insert on workspace_message_reads`,
+  `create policy workspace_message_reads_insert on workspace_message_reads for insert with check (
+    workspace_message_reads.user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists workspace_message_reads_update on workspace_message_reads`,
+  `create policy workspace_message_reads_update on workspace_message_reads for update using (
+    workspace_message_reads.user_id = ${UID} or ${IS_ADMIN}
+  ) with check (
+    workspace_message_reads.user_id = ${UID} or ${IS_ADMIN}
   )`,
 
   // --- audit_logs: any authenticated server call may append; only the

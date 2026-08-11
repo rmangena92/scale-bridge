@@ -269,6 +269,22 @@ export type PublicNotification = {
   createdAt: string;
 };
 
+// ------------------------------------------------ workspace messages
+/** A message in the workspace participant thread (workspace_messages table):
+ * the shared 'general' thread of a contract workspace, visible to the lead
+ * and the invited/joined/verified participant companies. `read` is relative
+ * to the caller's own read watermark (workspace_message_reads). */
+export type PublicWorkspaceMessage = {
+  id: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+  authorName: string | null;
+  authorEmail: string;
+  authorCompanyName: string | null;
+  isLead: boolean;
+  read: boolean;
+};
 // -------------------------------------------------------------- audit log
 /** Flat, JSON-safe audit details (strings/numbers/booleans/null only). */
 export type AuditDetails = Record<string, string | number | boolean | null>;

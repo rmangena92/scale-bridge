@@ -205,6 +205,30 @@ export const SCHEMA_SQL: string[] = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  // Lead-contractor commercial tab (Pricing & Commercials): one row per
+  // pricing submission against a work package. The lead records a reference
+  // baseline (status 'accepted' immediately — their own reference price) and
+  // participating companies submit quotes (status 'submitted') which the lead
+  // accepts or rejects. RLS mirrors the work_packages/tasks pattern (acyclic
+  // via contract_workspaces -> invitations -> users); only the lead or an
+  // sb_admin deletes.
+  `create table if not exists pricing_submissions (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    work_package_id uuid references work_packages(id) on delete set null,
+    company_id uuid references companies(id) on delete set null,
+    amount numeric(12,2) not null,
+    currency text not null default 'GBP',
+    description text,
+    status text not null default 'draft'
+      check (status in ('draft','submitted','accepted','rejected')),
+    submitted_by uuid references users(id) on delete set null,
+    submitted_at timestamptz,
+    reviewed_by uuid references users(id) on delete set null,
+    reviewed_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
 
   // Per-user notification inbox. Rows are written by server functions on
   // invitation/accept/decline/verify events (the insert policy allows the
@@ -667,6 +691,7 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists invoices_status_idx on invoices (status)`,
   `create index if not exists invoices_lead_idx on invoices (lead_contractor_id)`,
   `create index if not exists invoices_client_org_idx on invoices (client_org_id)`,
+  `create index if not exists pricing_submissions_workspace_id_idx on pricing_submissions (workspace_id)`,
   `create index if not exists progress_reports_workspace_id_idx on progress_reports (workspace_id)`,
   `create index if not exists progress_reports_lead_idx on progress_reports (lead_contractor_id)`,
   `create index if not exists progress_reports_client_org_idx on progress_reports (client_org_id)`,
@@ -716,6 +741,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table progress_reports enable row level security`,
   `alter table documents enable row level security`,
   `alter table tasks enable row level security`,
+  `alter table pricing_submissions enable row level security`,
   `alter table company_notes enable row level security`,
   `alter table messages enable row level security`,
   `alter table message_reads enable row level security`,
@@ -732,6 +758,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table progress_reports force row level security`,
   `alter table documents force row level security`,
   `alter table tasks force row level security`,
+  `alter table pricing_submissions force row level security`,
   `alter table company_notes force row level security`,
   `alter table messages force row level security`,
   `alter table message_reads force row level security`,
@@ -1104,6 +1131,92 @@ export const SCHEMA_SQL: string[] = [
     or exists (
       select 1 from contract_workspaces cw
       where cw.id = tasks.workspace_id and cw.lead_contractor_id = ${UID}
+    )
+  )`,
+  // --- pricing_submissions (lead-contractor commercial tab): the workspace
+  // lead manages pricing; any participant (invited/joined/verified) can read
+  // and contribute quotes; only the lead (or an admin) deletes. Same acyclic
+  // shape as tasks: pricing_submissions -> contract_workspaces -> invitations
+  // -> users.
+  `drop policy if exists pricing_submissions_select on pricing_submissions`,
+  `create policy pricing_submissions_select on pricing_submissions for select using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = pricing_submissions.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists pricing_submissions_insert on pricing_submissions`,
+  `create policy pricing_submissions_insert on pricing_submissions for insert with check (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = pricing_submissions.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists pricing_submissions_update on pricing_submissions`,
+  `create policy pricing_submissions_update on pricing_submissions for update using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = pricing_submissions.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  ) with check (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = pricing_submissions.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists pricing_submissions_delete on pricing_submissions`,
+  `create policy pricing_submissions_delete on pricing_submissions for delete using (
+    ${IS_ADMIN} or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = pricing_submissions.workspace_id and cw.lead_contractor_id = ${UID}
     )
   )`,
 

@@ -13,7 +13,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
   doAddDocument,
+  doCreateInvoice,
   doCreateTask,
+  doCreateVariation,
   doCreateWorkPackage,
   doCreateWorkspace,
   doDeleteWorkPackage,
@@ -23,9 +25,13 @@ import {
   doGetWorkspaces,
   doInviteCompany,
   doRespondToInvitation,
+  doReviewPricing,
   doSeedDemo,
+  doSubmitPricing,
+  doUpdateInvoiceStatus,
   doUpdateMilestoneStatus,
   doUpdateTaskStatus,
+  doUpdateVariationStatus,
   doUpdateWorkspace,
   doVerifyParticipant,
 } from "./workspace-core";
@@ -39,6 +45,7 @@ import type {
   WorkPackageInput,
   WorkspaceInput,
 } from "./types";
+import type { InvoiceInput, PricingInput, VariationInput } from "./workspace-core";
 
 export type {
   InvitationsResult,
@@ -134,6 +141,48 @@ export const listMyInvitations = createServerFn({ method: "GET" }).handler(() =>
 export const listMyNotifications = createServerFn({ method: "GET" }).handler(() =>
   doGetMyNotifications(),
 );
+
+export const submitPricing = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; input: PricingInput },
+  )
+  .handler(({ data }) => doSubmitPricing(data.workspaceId, data.input));
+
+export const reviewPricing = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; submissionId: string; decision: "accepted" | "rejected" },
+  )
+  .handler(({ data }) => doReviewPricing(data.workspaceId, data.submissionId, data.decision));
+
+export const createInvoice = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; input: InvoiceInput },
+  )
+  .handler(({ data }) => doCreateInvoice(data.workspaceId, data.input));
+
+export const updateInvoiceStatus = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; invoiceId: string; status: string },
+  )
+  .handler(({ data }) => doUpdateInvoiceStatus(data.workspaceId, data.invoiceId, data.status));
+
+export const createVariation = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; input: VariationInput },
+  )
+  .handler(({ data }) => doCreateVariation(data.workspaceId, data.input));
+
+export const updateVariationStatus = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; variationId: string; status: string },
+  )
+  .handler(({ data }) => doUpdateVariationStatus(data.workspaceId, data.variationId, data.status));
 
 export const seedDemoData = createServerFn({ method: "POST" }).handler(() =>
   doSeedDemo(),

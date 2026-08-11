@@ -9,6 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { asService, asUser, dbConfigured, ensureSchema } from "./db";
+import type { Tx, TxQuery } from "./db";
 import { auditQuery } from "./audit";
 import { loadSessionUser } from "./auth-core";
 import type {
@@ -22,9 +23,12 @@ import type {
   ParticipantRole,
   PublicDocument,
   PublicInvitation,
+  PublicInvoice,
   PublicMilestone,
   PublicNotification,
+  PublicPricingSubmission,
   PublicTask,
+  PublicVariation,
   PublicWorkPackage,
   PublicWorkspace,
   TaskInput,
@@ -34,9 +38,11 @@ import type {
   WorkspaceStatus,
 } from "./types";
 import {
+  INVOICE_LEAD_STATUSES,
   INVITATION_STATUSES,
   MILESTONE_LEAD_STATUSES,
   TASK_STATUSES,
+  VARIATION_LEAD_STATUSES,
 } from "./types";
 
 // ------------------------------------------------------------- result types
@@ -60,6 +66,9 @@ export type WorkspaceDetailResult =
       tasks: PublicTask[];
       milestones: PublicMilestone[];
       companies: WorkspaceCompany[];
+      pricingSubmissions: PublicPricingSubmission[];
+      invoices: PublicInvoice[];
+      variations: PublicVariation[];
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -312,6 +321,49 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
          where i.workspace_id = ${workspaceId}
            and i.status in ('joined','verified')
          order by c.name asc`,
+      tx`select ps.id, ps.workspace_id, ps.work_package_id, ps.company_id,
+                ps.amount, ps.currency, ps.description, ps.status,
+                ps.submitted_by, ps.submitted_at, ps.reviewed_by, ps.reviewed_at,
+                ps.created_at, ps.updated_at,
+                wp.name as work_package_name, c.name as company_name,
+                su.email as submitted_by_email, ru.email as reviewed_by_email
+         from pricing_submissions ps
+         left join work_packages wp on wp.id = ps.work_package_id
+         left join companies c on c.id = ps.company_id
+         left join users su on su.id = ps.submitted_by
+         left join users ru on ru.id = ps.reviewed_by
+         where ps.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = ps.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i where i.workspace_id = cw.id and lower(i.email) = lower(${user.email}) and i.status in ('invited','joined','verified'))))
+         order by ps.created_at desc`,
+      tx`select i.id, i.workspace_id, i.work_package_id, i.invoice_number, i.title,
+                i.amount, i.currency, i.status, i.due_date,
+                i.submitted_by, i.submitted_at, i.reviewed_by, i.reviewed_at,
+                i.payment_recorded_at, i.created_at, i.updated_at,
+                wp.name as work_package_name,
+                su.email as submitted_by_email, ru.email as reviewed_by_email
+         from invoices i
+         left join work_packages wp on wp.id = i.work_package_id
+         left join users su on su.id = i.submitted_by
+         left join users ru on ru.id = i.reviewed_by
+         where i.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = i.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i2 where i2.workspace_id = cw.id and lower(i2.email) = lower(${user.email}) and i2.status in ('invited','joined','verified'))))
+         order by i.created_at desc`,
+      tx`select v.id, v.workspace_id, v.work_package_id, v.title, v.reason, v.description,
+                v.cost_impact, v.proposed_amount_cents, v.time_impact, v.status,
+                v.recommended_decision, v.conditions, v.submitted_by, v.submitted_at,
+                v.decided_by, v.decided_at, v.created_at, v.updated_at,
+                wp.name as work_package_name,
+                su.email as submitted_by_email, du.email as decided_by_email
+         from variations v
+         left join work_packages wp on wp.id = v.work_package_id
+         left join users su on su.id = v.submitted_by
+         left join users du on du.id = v.decided_by
+         where v.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = v.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i3 where i3.workspace_id = cw.id and lower(i3.email) = lower(${user.email}) and i3.status in ('invited','joined','verified'))))
+         order by v.created_at desc`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -398,6 +450,70 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
     const companyRows = detailRows[8] as {
       id: string;
       name: string;
+    }[];
+    const pricingRows = detailRows[9] as {
+      id: string;
+      workspace_id: string;
+      work_package_id: string | null;
+      company_id: string | null;
+      amount: string | number;
+      currency: string;
+      description: string | null;
+      status: PublicPricingSubmission["status"];
+      submitted_by: string | null;
+      submitted_at: string | null;
+      reviewed_by: string | null;
+      reviewed_at: string | null;
+      created_at: string;
+      updated_at: string;
+      work_package_name: string | null;
+      company_name: string | null;
+      submitted_by_email: string | null;
+      reviewed_by_email: string | null;
+    }[];
+    const invoiceRows = detailRows[10] as {
+      id: string;
+      workspace_id: string;
+      work_package_id: string | null;
+      invoice_number: string;
+      title: string | null;
+      amount: string | number;
+      currency: string;
+      status: PublicInvoice["status"];
+      due_date: string | null;
+      submitted_by: string | null;
+      submitted_at: string | null;
+      reviewed_by: string | null;
+      reviewed_at: string | null;
+      payment_recorded_at: string | null;
+      created_at: string;
+      updated_at: string;
+      work_package_name: string | null;
+      submitted_by_email: string | null;
+      reviewed_by_email: string | null;
+    }[];
+    const variationRows = detailRows[11] as {
+      id: string;
+      workspace_id: string;
+      work_package_id: string | null;
+      title: string;
+      reason: string | null;
+      description: string | null;
+      cost_impact: string | number | null;
+      proposed_amount_cents: string | number | null;
+      time_impact: string | null;
+      status: PublicVariation["status"];
+      recommended_decision: string | null;
+      conditions: string | null;
+      submitted_by: string | null;
+      submitted_at: string | null;
+      decided_by: string | null;
+      decided_at: string | null;
+      created_at: string;
+      updated_at: string;
+      work_package_name: string | null;
+      submitted_by_email: string | null;
+      decided_by_email: string | null;
     }[];
 
     const ws = wsRows[0];
@@ -493,6 +609,82 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       name: r.name,
     }));
 
+    // Commercial tabs are lead-only: pricing, invoices and variations are
+    // withheld from participants entirely (commercial data stays private to
+    // the lead contractor).
+    const pricingSubmissions: PublicPricingSubmission[] = isLead
+      ? pricingRows.map((r) => ({
+          id: r.id,
+          workspaceId: r.workspace_id,
+          workPackageId: r.work_package_id,
+          workPackageName: r.work_package_name,
+          companyId: r.company_id,
+          companyName: r.company_name,
+          amount: Number(r.amount ?? 0),
+          currency: r.currency,
+          description: r.description,
+          status: r.status,
+          submittedByUserId: r.submitted_by,
+          submittedByEmail: r.submitted_by_email,
+          submittedAt: r.submitted_at ? String(r.submitted_at) : null,
+          reviewedByUserId: r.reviewed_by,
+          reviewedByEmail: r.reviewed_by_email,
+          reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+          createdAt: String(r.created_at),
+          updatedAt: String(r.updated_at),
+        }))
+      : [];
+
+    const invoices: PublicInvoice[] = isLead
+      ? invoiceRows.map((r) => ({
+          id: r.id,
+          workspaceId: r.workspace_id,
+          workPackageId: r.work_package_id,
+          workPackageName: r.work_package_name,
+          invoiceNumber: r.invoice_number,
+          title: r.title,
+          amount: Number(r.amount ?? 0),
+          currency: r.currency,
+          status: r.status,
+          dueDate: r.due_date ? String(r.due_date) : null,
+          submittedByUserId: r.submitted_by,
+          submittedByEmail: r.submitted_by_email,
+          submittedAt: r.submitted_at ? String(r.submitted_at) : null,
+          reviewedByUserId: r.reviewed_by,
+          reviewedByEmail: r.reviewed_by_email,
+          reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+          paymentRecordedAt: r.payment_recorded_at ? String(r.payment_recorded_at) : null,
+          createdAt: String(r.created_at),
+          updatedAt: String(r.updated_at),
+        }))
+      : [];
+
+    const variations: PublicVariation[] = isLead
+      ? variationRows.map((r) => ({
+          id: r.id,
+          workspaceId: r.workspace_id,
+          workPackageId: r.work_package_id,
+          workPackageName: r.work_package_name,
+          title: r.title,
+          reason: r.reason,
+          description: r.description,
+          costImpact: r.cost_impact != null ? Number(r.cost_impact) : null,
+          proposedAmountCents: r.proposed_amount_cents != null ? Number(r.proposed_amount_cents) : null,
+          timeImpact: r.time_impact,
+          status: r.status,
+          recommendedDecision: r.recommended_decision,
+          conditions: r.conditions,
+          submittedByUserId: r.submitted_by,
+          submittedByEmail: r.submitted_by_email,
+          submittedAt: r.submitted_at ? String(r.submitted_at) : null,
+          decidedByUserId: r.decided_by,
+          decidedByEmail: r.decided_by_email,
+          decidedAt: r.decided_at ? String(r.decided_at) : null,
+          createdAt: String(r.created_at),
+          updatedAt: String(r.updated_at),
+        }))
+      : [];
+
     return {
       ok: true,
       workspace: {
@@ -515,6 +707,9 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       tasks,
       milestones,
       companies,
+      pricingSubmissions,
+      invoices,
+      variations,
     };
   } catch (err) {
     console.error("getWorkspace failed:", err);
@@ -1024,6 +1219,416 @@ export async function doUpdateMilestoneStatus(
   }
 }
 
+// ------------------------------------------- commercial tabs (pricing /
+// invoices / approvals / variations). All four tabs are lead-only in the UI;
+// RLS still permits participants to read pricing (mirroring tasks) but the
+// server withholds the arrays from non-leads in doGetWorkspace.
+// A notification row helper: works within the asUser() scope — the insert
+// policy allows a lead to notify someone they invited into their workspace,
+// and self-notification (used by the demo seed).
+function notifyQuery(
+  tx: Tx,
+  userId: string,
+  workspaceId: string,
+  type: string,
+  title: string,
+  body: string,
+  link: string | null,
+): ReturnType<Tx> {
+  return tx`insert into notifications (user_id, workspace_id, type, title, body, link)
+    values (${userId}, ${workspaceId}, ${type}, ${title}, ${body}, ${link})`;
+}
+
+// --------------------------------------------------------------- pricing
+export type PricingInput = {
+  workPackageId: string;
+  amount: string;
+  currency: string;
+  description: string;
+  /** true = the lead's own reference baseline (accepted immediately). */
+  baseline: boolean;
+};
+export async function doSubmitPricing(
+  workspaceId: string,
+  input: PricingInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const amountNum = Number((input.amount ?? "").toString().trim());
+  if (!Number.isFinite(amountNum) || amountNum < 0) {
+    return { ok: false, error: "Enter a valid amount." };
+  }
+  const currency = cleanText(input.currency, 3).toUpperCase() || "GBP";
+  const description = cleanText(input.description, 2000) || null;
+  const workPackageId = cleanText(input.workPackageId, 36) || null;
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can record pricing." };
+    }
+    if (workPackageId) {
+      const pkgRows = (await asUser(user.id, user.role, (tx) => [
+        tx`select id from work_packages where id = ${workPackageId} and workspace_id = ${workspaceId}`,
+      ]))[1] as { id: string }[];
+      if (!pkgRows[0]) return { ok: false, error: "Work package not found in this workspace." };
+    }
+
+    const submissionId = randomUUID();
+    // The lead's own baseline is accepted immediately (it is the reference
+    // price); quotes submitted for review start as 'submitted'.
+    const status = input.baseline ? "accepted" : "submitted";
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into pricing_submissions
+           (id, workspace_id, work_package_id, amount, currency, description, status,
+            submitted_by, submitted_at, reviewed_by, reviewed_at, created_at, updated_at)
+         values (${submissionId}, ${workspaceId}, ${workPackageId}, ${amountNum}, ${currency},
+                 ${description}, ${status}, ${user.id}, now(),
+                 ${status === "accepted" ? user.id : null},
+                 ${status === "accepted" ? new Date() : null}, now(), now())`,
+      auditQuery(tx, user.id, "pricing.submit", {
+        workspaceId,
+        submissionId,
+        workPackageId: workPackageId ?? null,
+        amount: amountNum,
+        currency,
+        baseline: Boolean(input.baseline),
+        status,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("submitPricing failed:", err);
+    return { ok: false, error: "Could not record the pricing." };
+  }
+}
+
+export async function doReviewPricing(
+  workspaceId: string,
+  submissionId: string,
+  decision: "accepted" | "rejected",
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can review pricing." };
+    }
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select ps.status, ps.submitted_by, ps.work_package_id, ps.amount, ps.currency
+         from pricing_submissions ps
+         where ps.id = ${submissionId} and ps.workspace_id = ${workspaceId}`,
+    ]))[1] as {
+      status: string;
+      submitted_by: string | null;
+      work_package_id: string | null;
+      amount: string | number;
+      currency: string;
+    }[];
+    const row = rows[0];
+    if (!row) return { ok: false, error: "Pricing submission not found in this workspace." };
+    if (row.status === "accepted" || row.status === "rejected") {
+      return { ok: false, error: "This pricing submission has already been reviewed." };
+    }
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`update pricing_submissions
+         set status = ${decision}, reviewed_by = ${user.id}, reviewed_at = now(), updated_at = now()
+         where id = ${submissionId} and workspace_id = ${workspaceId}`,
+      auditQuery(tx, user.id, "pricing.review", {
+        workspaceId,
+        submissionId,
+        decision,
+        previousStatus: row.status,
+        amount: Number(row.amount ?? 0),
+        currency: row.currency,
+      }),
+      // Notify the submitter (if a different user) that their pricing was
+      // decided — the notifications insert policy allows the lead to notify
+      // anyone they invited into the workspace.
+      ...(row.submitted_by && row.submitted_by !== user.id
+        ? [
+            notifyQuery(
+              tx,
+              row.submitted_by,
+              workspaceId,
+              "pricing.reviewed",
+              decision === "accepted" ? "Pricing accepted" : "Pricing rejected",
+              `Your pricing for a work package on “${ws.title}” was ${
+                decision === "accepted" ? "accepted" : "rejected"
+              }.`,
+              `/workspaces/${workspaceId}?tab=pricing`,
+            ),
+          ]
+        : []),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("reviewPricing failed:", err);
+    return { ok: false, error: "Could not review the pricing." };
+  }
+}
+
+// ----------------------------------------------------------------- invoices
+export type InvoiceInput = {
+  workPackageId: string;
+  invoiceNumber: string;
+  title: string;
+  amount: string;
+  currency: string;
+  dueDate: string; // yyyy-mm-dd or ''
+};
+export async function doCreateInvoice(
+  workspaceId: string,
+  input: InvoiceInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const invoiceNumber = cleanText(input.invoiceNumber, 50);
+  if (!invoiceNumber) return { ok: false, error: "Invoice number is required." };
+  const amountNum = Number((input.amount ?? "").toString().trim());
+  if (!Number.isFinite(amountNum) || amountNum < 0) {
+    return { ok: false, error: "Enter a valid amount." };
+  }
+  const currency = cleanText(input.currency, 3).toUpperCase() || "GBP";
+  const title = cleanText(input.title, 200) || null;
+  const workPackageId = cleanText(input.workPackageId, 36) || null;
+  let dueDate: Date | null = null;
+  const dd = (input.dueDate ?? "").trim();
+  if (dd) {
+    const parsed = new Date(`${dd}T00:00:00Z`);
+    if (!Number.isNaN(parsed.getTime())) dueDate = parsed;
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can create invoices." };
+    }
+    if (workPackageId) {
+      const pkgRows = (await asUser(user.id, user.role, (tx) => [
+        tx`select id from work_packages where id = ${workPackageId} and workspace_id = ${workspaceId}`,
+      ]))[1] as { id: string }[];
+      if (!pkgRows[0]) return { ok: false, error: "Work package not found in this workspace." };
+    }
+
+    const invoiceId = randomUUID();
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into invoices
+           (id, workspace_id, work_package_id, lead_contractor_id, invoice_number, title,
+            amount, currency, status, submitted_by, submitted_at, created_at, updated_at)
+         values (${invoiceId}, ${workspaceId}, ${workPackageId}, ${ws.leadContractorId},
+                 ${invoiceNumber}, ${title}, ${amountNum}, ${currency}, 'draft',
+                 ${user.id}, now(), now(), now())`,
+      auditQuery(tx, user.id, "invoice.create", {
+        workspaceId,
+        invoiceId,
+        invoiceNumber,
+        workPackageId: workPackageId ?? null,
+        title: title ?? null,
+        amount: amountNum,
+        currency,
+        dueDate: dueDate ? dueDate.toISOString().slice(0, 10) : null,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    const e = err as { code?: string };
+    if (e && e.code === "23505") {
+      return { ok: false, error: "An invoice with that number already exists." };
+    }
+    console.error("createInvoice failed:", err);
+    return { ok: false, error: "Could not create the invoice." };
+  }
+}
+
+export async function doUpdateInvoiceStatus(
+  workspaceId: string,
+  invoiceId: string,
+  status: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  if (!(INVOICE_LEAD_STATUSES as readonly string[]).includes(status)) {
+    return { ok: false, error: "Invalid invoice status." };
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can update invoices." };
+    }
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select status, invoice_number from invoices where id = ${invoiceId} and workspace_id = ${workspaceId}`,
+    ]))[1] as { status: string; invoice_number: string }[];
+    if (!rows[0]) return { ok: false, error: "Invoice not found in this workspace." };
+    const previousStatus = rows[0].status;
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`update invoices
+         set status = ${status},
+             payment_recorded_at = ${status === "paid" ? new Date() : null},
+             paid_at = ${status === "paid" ? new Date() : null},
+             updated_at = now()
+         where id = ${invoiceId} and workspace_id = ${workspaceId}`,
+      auditQuery(tx, user.id, "invoice.update", {
+        workspaceId,
+        invoiceId,
+        invoiceNumber: rows[0].invoice_number,
+        status,
+        previousStatus,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("updateInvoiceStatus failed:", err);
+    return { ok: false, error: "Could not update the invoice." };
+  }
+}
+
+// ---------------------------------------------------------------- variations
+export type VariationInput = {
+  title: string;
+  reason: string;
+  description: string;
+  costImpact: string;
+  timeImpact: string;
+  workPackageId: string;
+};
+export async function doCreateVariation(
+  workspaceId: string,
+  input: VariationInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const title = cleanText(input.title, 200);
+  if (!title) return { ok: false, error: "Variation title is required." };
+  const reason = cleanText(input.reason, 1000) || null;
+  const description = cleanText(input.description, 2000) || null;
+  const timeImpact = cleanText(input.timeImpact, 500) || null;
+  const workPackageId = cleanText(input.workPackageId, 36) || null;
+  let costImpact: number | null = null;
+  const ci = (input.costImpact ?? "").toString().trim();
+  if (ci) {
+    const n = Number(ci);
+    if (!Number.isFinite(n)) return { ok: false, error: "Cost impact must be a number." };
+    costImpact = n;
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can raise variations." };
+    }
+    if (workPackageId) {
+      const pkgRows = (await asUser(user.id, user.role, (tx) => [
+        tx`select id from work_packages where id = ${workPackageId} and workspace_id = ${workspaceId}`,
+      ]))[1] as { id: string }[];
+      if (!pkgRows[0]) return { ok: false, error: "Work package not found in this workspace." };
+    }
+
+    const variationId = randomUUID();
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into variations
+           (id, workspace_id, lead_contractor_id, work_package_id, title, reason, description,
+            cost_impact, time_impact, status, submitted_by, created_at, updated_at)
+         values (${variationId}, ${workspaceId}, ${ws.leadContractorId}, ${workPackageId},
+                 ${title}, ${reason}, ${description}, ${costImpact}, ${timeImpact},
+                 'draft', ${user.id}, now(), now())`,
+      auditQuery(tx, user.id, "variation.create", {
+        workspaceId,
+        variationId,
+        title,
+        workPackageId: workPackageId ?? null,
+        costImpact: costImpact ?? null,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("createVariation failed:", err);
+    return { ok: false, error: "Could not raise the variation." };
+  }
+}
+
+export async function doUpdateVariationStatus(
+  workspaceId: string,
+  variationId: string,
+  status: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  if (!(VARIATION_LEAD_STATUSES as readonly string[]).includes(status)) {
+    return { ok: false, error: "Invalid variation status." };
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can update variations." };
+    }
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select status, title from variations where id = ${variationId} and workspace_id = ${workspaceId}`,
+    ]))[1] as { status: string; title: string }[];
+    if (!rows[0]) return { ok: false, error: "Variation not found in this workspace." };
+    const previousStatus = rows[0].status;
+
+    // Guard the transitions the lead is allowed to make: draft -> submitted
+    // (send to the client for review) and approved / approved_with_conditions
+    // -> implemented (record that the change has been delivered).
+    if (status === "submitted" && previousStatus !== "draft") {
+      return { ok: false, error: "Only a draft variation can be submitted for client review." };
+    }
+    if (status === "implemented" && !["approved", "approved_with_conditions"].includes(previousStatus)) {
+      return { ok: false, error: "A variation can only be marked implemented after the client approves it." };
+    }
+    if (status === "draft" && previousStatus !== "submitted") {
+      return { ok: false, error: "Only a submitted variation can be returned to draft." };
+    }
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`update variations
+         set status = ${status},
+             submitted_at = ${status === "submitted" ? new Date() : null},
+             updated_at = now()
+         where id = ${variationId} and workspace_id = ${workspaceId}`,
+      auditQuery(tx, user.id, "variation.update", {
+        workspaceId,
+        variationId,
+        title: rows[0].title,
+        status,
+        previousStatus,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("updateVariationStatus failed:", err);
+    return { ok: false, error: "Could not update the variation." };
+  }
+}
+
 // --------------------------------------------------------------- my things
 export async function doGetMyInvitations(): Promise<InvitationsResult> {
   if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
@@ -1128,9 +1733,78 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       tx`select id from contract_workspaces where lead_contractor_id = ${user.id} and title = ${DEMO_WORKSPACE_TITLE}`,
     ]))[1] as { id: string }[];
     if (existing[0]) {
-      return { ok: false, error: "Demo data already exists for your account." };
+      // The demo workspace already exists (e.g. the page was re-opened after a
+      // prior seed) — idempotently add the commercial demo rows (pricing
+      // submissions, one invoice, one variation) only if none exist yet.
+      const wsId = existing[0].id;
+      const probe = (await asUser(user.id, user.role, (tx) => [
+        tx`select id, name from work_packages where workspace_id = ${wsId} order by created_at asc`,
+        tx`select id from pricing_submissions where workspace_id = ${wsId} limit 1`,
+        tx`select id from invoices where workspace_id = ${wsId} limit 1`,
+        tx`select id from variations where workspace_id = ${wsId} limit 1`,
+      ])) as unknown[];
+      const packages = probe[1] as { id: string; name: string }[];
+      const hasPricing = (probe[2] as { id: string }[]).length > 0;
+      const hasInvoice = (probe[3] as { id: string }[]).length > 0;
+      const hasVariation = (probe[4] as { id: string }[]).length > 0;
+      if (hasPricing && hasInvoice && hasVariation) return { ok: true };
+      const hVAC = packages.find((p) => p.name.startsWith("HVAC"));
+      const cleaning = packages.find((p) => p.name.startsWith("Cleaning"));
+      const security = packages.find((p) => p.name.startsWith("Security"));
+      await asUser(user.id, user.role, (tx) => {
+        const qs: TxQuery[] = [];
+        if (!hasPricing) {
+          if (hVAC) {
+            qs.push(tx`insert into pricing_submissions
+                 (id, workspace_id, work_package_id, amount, currency, description, status,
+                  submitted_by, submitted_at, reviewed_by, reviewed_at, created_at, updated_at)
+               values (${randomUUID()}, ${wsId}, ${hVAC.id}, ${18450}, 'GBP',
+                       ${"Reference baseline: quarterly servicing + on-call repairs."},
+                       'accepted', ${user.id}, now(), ${user.id}, now(), now(), now())`);
+          }
+          if (cleaning) {
+            qs.push(tx`insert into pricing_submissions
+                 (id, workspace_id, work_package_id, amount, currency, description, status,
+                  submitted_by, submitted_at, created_at, updated_at)
+               values (${randomUUID()}, ${wsId}, ${cleaning.id}, ${12200}, 'GBP',
+                       ${"Annual quote: daily janitorial + lobby deep-cleans."},
+                       'submitted', ${user.id}, now(), now(), now())`);
+          }
+        }
+        if (!hasInvoice && hVAC) {
+          qs.push(tx`insert into invoices
+               (id, workspace_id, work_package_id, lead_contractor_id, invoice_number, title,
+                amount, currency, status, submitted_by, submitted_at, created_at, updated_at)
+             values (${randomUUID()}, ${wsId}, ${hVAC.id}, ${user.id}, 'INV-2026-0001',
+                     ${"Q3 HVAC servicing"}, ${6150}, 'GBP', 'submitted',
+                     ${user.id}, now(), now(), now())`);
+        }
+        if (!hasVariation && security) {
+          qs.push(tx`insert into variations
+               (id, workspace_id, lead_contractor_id, work_package_id, title, reason,
+                description, cost_impact, time_impact, status, submitted_by,
+                submitted_at, created_at, updated_at)
+             values (${randomUUID()}, ${wsId}, ${user.id}, ${security.id},
+                     ${"Extra bank-holiday patrol cover"},
+                     ${"Client requested additional public-holiday patrols for the Q4 events programme."},
+                     ${"Two extra night patrols on each of the three bank holidays in Q4 (4h each)."},
+                     ${780}, ${"+3 weeks (patrol rota update)"}, 'submitted',
+                     ${user.id}, now(), now(), now())`);
+        }
+        qs.push(auditQuery(tx, user.id, "demo.seed", {
+          workspaceId: wsId,
+          commercial: true,
+          pricing: hasPricing ? 0 : 2,
+          invoices: hasInvoice ? 0 : 1,
+          variations: hasVariation ? 0 : 1,
+        }));
+        return qs;
+      });
+      return { ok: true };
     }
 
+    // Fresh seed: full demo workspace (packages, invitations, delivery tabs)
+    // plus the commercial rows (pricing / invoice / variation).
     const wsId = randomUUID();
     const pkgIds = [randomUUID(), randomUUID(), randomUUID()];
     const invIds = [randomUUID(), randomUUID(), randomUUID()];
@@ -1177,8 +1851,39 @@ export async function doSeedDemo(): Promise<SimpleResult> {
          values (${randomUUID()}, ${wsId}, ${user.id}, 'Cleaning Rota — Q3', 'report', 'workspace', ${user.id}, 'published', now(), now())`,
       tx`insert into documents (id, workspace_id, lead_contractor_id, name, category, visibility, uploaded_by, status, created_at, updated_at)
          values (${randomUUID()}, ${wsId}, ${user.id}, 'Security Incident Log Template', 'other', 'workspace', ${user.id}, 'published', now(), now())`,
+      // Commercial demo rows: HVAC baseline (accepted), cleaning quote
+      // (submitted — awaits lead review), an issued invoice referencing the
+      // HVAC package, and a pending variation on the security package.
+      tx`insert into pricing_submissions
+           (id, workspace_id, work_package_id, amount, currency, description, status,
+            submitted_by, submitted_at, reviewed_by, reviewed_at, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[0]}, ${18450}, 'GBP',
+                 ${"Reference baseline: quarterly servicing + on-call repairs."},
+                 'accepted', ${user.id}, now(), ${user.id}, now(), now(), now())`,
+      tx`insert into pricing_submissions
+           (id, workspace_id, work_package_id, amount, currency, description, status,
+            submitted_by, submitted_at, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[1]}, ${12200}, 'GBP',
+                 ${"Annual quote: daily janitorial + lobby deep-cleans."},
+                 'submitted', ${user.id}, now(), now(), now())`,
+      tx`insert into invoices
+           (id, workspace_id, work_package_id, lead_contractor_id, invoice_number, title,
+            amount, currency, status, submitted_by, submitted_at, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[0]}, ${user.id}, 'INV-2026-0001',
+                 ${"Q3 HVAC servicing"}, ${6150}, 'GBP', 'submitted',
+                 ${user.id}, now(), now(), now())`,
+      tx`insert into variations
+           (id, workspace_id, lead_contractor_id, work_package_id, title, reason,
+            description, cost_impact, time_impact, status, submitted_by,
+            submitted_at, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${user.id}, ${pkgIds[2]},
+                 ${"Extra bank-holiday patrol cover"},
+                 ${"Client requested additional public-holiday patrols for the Q4 events programme."},
+                 ${"Two extra night patrols on each of the three bank holidays in Q4 (4h each)."},
+                 ${780}, ${"+3 weeks (patrol rota update)"}, 'submitted',
+                 ${user.id}, now(), now(), now())`,
       auditQuery(tx, user.id, "workspace.create", { workspaceId: wsId, title: DEMO_WORKSPACE_TITLE, status: "active", demo: true }),
-      auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3, tasks: 3, documents: 2 }),
+      auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3, tasks: 3, documents: 2, pricing: 2, invoices: 1, variations: 1 }),
     ]);
     return { ok: true };
   } catch (err) {

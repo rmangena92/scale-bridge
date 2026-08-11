@@ -449,6 +449,192 @@ export type WorkspaceCompany = {
   id: string;
   name: string;
 };
+// -------------------------------------------------- lead commercial tabs
+// Pricing & Commercials: a pricing submission (quote or reference baseline)
+// against a work package. Statuses mirror the pricing_submissions table.
+export const PRICING_SUBMISSION_STATUSES = [
+  "draft",
+  "submitted",
+  "accepted",
+  "rejected",
+] as const;
+export type PricingSubmissionStatus = (typeof PRICING_SUBMISSION_STATUSES)[number];
+export const PRICING_SUBMISSION_STATUS_LABELS: Record<
+  PricingSubmissionStatus,
+  string
+> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  accepted: "Accepted",
+  rejected: "Rejected",
+};
+export const PRICING_SUBMISSION_STATUS_TONES: Record<
+  PricingSubmissionStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  draft: "slate",
+  submitted: "amber",
+  accepted: "green",
+  rejected: "red",
+};
+export type PublicPricingSubmission = {
+  id: string;
+  workspaceId: string;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  companyId: string | null;
+  companyName: string | null;
+  amount: number;
+  currency: string;
+  description: string | null;
+  status: PricingSubmissionStatus;
+  submittedByUserId: string | null;
+  submittedByEmail: string | null;
+  submittedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewedByEmail: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+// Invoices: statuses mirror the invoices table check constraint exactly.
+export const INVOICE_STATUSES = [
+  "draft",
+  "submitted",
+  "under_review",
+  "approved",
+  "rejected",
+  "correction_required",
+  "scheduled_for_payment",
+  "paid",
+  "overdue",
+  "cancelled",
+] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  under_review: "Under review",
+  approved: "Approved",
+  rejected: "Rejected",
+  correction_required: "Correction required",
+  scheduled_for_payment: "Scheduled for payment",
+  paid: "Paid",
+  overdue: "Overdue",
+  cancelled: "Cancelled",
+};
+export const INVOICE_STATUS_TONES: Record<
+  InvoiceStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  draft: "slate",
+  submitted: "blue",
+  under_review: "amber",
+  approved: "teal",
+  rejected: "red",
+  correction_required: "red",
+  scheduled_for_payment: "amber",
+  paid: "green",
+  overdue: "red",
+  cancelled: "slate",
+};
+/** Statuses the workspace lead may set directly (client review is separate). */
+export const INVOICE_LEAD_STATUSES = [
+  "draft",
+  "submitted",
+  "scheduled_for_payment",
+  "paid",
+  "overdue",
+  "cancelled",
+] as const;
+export type InvoiceLeadStatus = (typeof INVOICE_LEAD_STATUSES)[number];
+export type PublicInvoice = {
+  id: string;
+  workspaceId: string;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  invoiceNumber: string;
+  title: string | null;
+  amount: number;
+  currency: string;
+  status: InvoiceStatus;
+  dueDate: string | null;
+  submittedByUserId: string | null;
+  submittedByEmail: string | null;
+  submittedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewedByEmail: string | null;
+  reviewedAt: string | null;
+  paymentRecordedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+// Variations: statuses mirror the variations table check constraint exactly.
+export const VARIATION_STATUSES = [
+  "draft",
+  "submitted",
+  "under_client_review",
+  "clarification_requested",
+  "approved",
+  "rejected",
+  "approved_with_conditions",
+  "implemented",
+] as const;
+export type VariationStatus = (typeof VARIATION_STATUSES)[number];
+export const VARIATION_STATUS_LABELS: Record<VariationStatus, string> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  under_client_review: "Under client review",
+  clarification_requested: "Clarification requested",
+  approved: "Approved",
+  rejected: "Rejected",
+  approved_with_conditions: "Approved with conditions",
+  implemented: "Implemented",
+};
+export const VARIATION_STATUS_TONES: Record<
+  VariationStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  draft: "slate",
+  submitted: "blue",
+  under_client_review: "amber",
+  clarification_requested: "amber",
+  approved: "green",
+  rejected: "red",
+  approved_with_conditions: "teal",
+  implemented: "teal",
+};
+/** Statuses the workspace lead may set directly (client decision is separate). */
+export const VARIATION_LEAD_STATUSES = [
+  "draft",
+  "submitted",
+  "implemented",
+] as const;
+export type VariationLeadStatus = (typeof VARIATION_LEAD_STATUSES)[number];
+export type PublicVariation = {
+  id: string;
+  workspaceId: string;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  title: string;
+  reason: string | null;
+  description: string | null;
+  costImpact: number | null;
+  proposedAmountCents: number | null;
+  timeImpact: string | null;
+  status: VariationStatus;
+  recommendedDecision: string | null;
+  conditions: string | null;
+  submittedByUserId: string | null;
+  submittedByEmail: string | null;
+  submittedAt: string | null;
+  decidedByUserId: string | null;
+  decidedByEmail: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 
 // -------------------------------------------------------------- admin portal
 /** Internal ScaleBridge staff roles (admin_roles.role). */

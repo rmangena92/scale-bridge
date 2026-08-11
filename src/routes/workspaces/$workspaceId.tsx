@@ -18,13 +18,19 @@ import {
 import { getSessionUser } from "~/lib/auth";
 import {
   addDocument,
+  createInvoice,
   createTask,
+  createVariation,
   createWorkPackage,
   deleteWorkPackage,
   getWorkspace,
   inviteCompany,
+  reviewPricing,
+  submitPricing,
+  updateInvoiceStatus,
   updateMilestoneStatus,
   updateTaskStatus,
+  updateVariationStatus,
   updateWorkspace,
   verifyParticipant,
 } from "~/lib/workspace";
@@ -36,6 +42,9 @@ import {
   DOCUMENT_VISIBILITIES,
   DOCUMENT_VISIBILITY_LABELS,
   DOCUMENT_VISIBILITY_TONES,
+  INVOICE_LEAD_STATUSES,
+  INVOICE_STATUS_LABELS,
+  INVOICE_STATUS_TONES,
   INVITATION_BADGE_TONES,
   INVITATION_STATUS_LABELS,
   MILESTONE_LEAD_STATUSES,
@@ -43,9 +52,13 @@ import {
   MILESTONE_STATUS_TONES,
   PARTICIPANT_ROLE_LABELS,
   PARTICIPANT_ROLES,
+  PRICING_SUBMISSION_STATUS_LABELS,
+  PRICING_SUBMISSION_STATUS_TONES,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   TASK_STATUS_TONES,
+  VARIATION_STATUS_LABELS,
+  VARIATION_STATUS_TONES,
   WORKSPACE_BADGE_TONES,
   WORKSPACE_STATUSES,
   WORKSPACE_STATUS_LABELS,
@@ -58,9 +71,12 @@ import type {
   MilestoneStatus,
   ParticipantRole,
   PublicDocument,
+  PublicInvoice,
   PublicInvitation,
   PublicMilestone,
+  PublicPricingSubmission,
   PublicTask,
+  PublicVariation,
   PublicUser,
   PublicWorkPackage,
   PublicWorkspace,
@@ -114,8 +130,12 @@ const ACTIVE_TABS: TabId[] = [
   "companies",
   "packages",
   "documents",
+  "pricing",
   "tasks",
   "milestones",
+  "approvals",
+  "variations",
+  "invoices",
   "audit",
 ];
 
@@ -218,6 +238,9 @@ function WorkspaceBody({
     tasks,
     milestones,
     companies,
+    pricingSubmissions,
+    invoices,
+    variations,
   } = data;
 
   return (
@@ -383,6 +406,55 @@ function WorkspaceBody({
           </p>
         </Card>
       )}
+      {tab === "pricing" && isLead && (
+        <PricingTab
+          workspace={workspace}
+          packages={packages}
+          pricingSubmissions={pricingSubmissions}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "pricing" && !isLead && <CommercialPrivacyCard />}
+      {tab === "invoices" && isLead && (
+        <InvoicesTab
+          workspace={workspace}
+          packages={packages}
+          invoices={invoices}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "invoices" && !isLead && <CommercialPrivacyCard />}
+      {tab === "approvals" && isLead && (
+        <ApprovalsTab
+          workspace={workspace}
+          pricingSubmissions={pricingSubmissions}
+          variations={variations}
+          invoices={invoices}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "approvals" && !isLead && <CommercialPrivacyCard />}
+      {tab === "variations" && isLead && (
+        <VariationsTab
+          workspace={workspace}
+          packages={packages}
+          variations={variations}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "variations" && !isLead && <CommercialPrivacyCard />}
       {!ACTIVE_TABS.includes(tab) && <PlaceholderTab tab={tab} />}
     </AppShell>
   );
@@ -1567,6 +1639,917 @@ function AuditLogTab({ audit }: { audit: AuditEntry[] }) {
     </Card>
   );
 }
+// -------------------------------------------------- commercial tabs (lead)
+// Pricing, invoices, variations and the approvals inbox are commercial data —
+// rendered only for the workspace lead; participants get a privacy card.
+function CommercialPrivacyCard() {
+  return (
+    <Card className="p-8 text-center">
+      <p className="text-sm text-muted">
+        Pricing, invoices, variations and approvals are private to the lead
+        contractor — commercial terms are never shared with participating
+        companies.
+      </p>
+    </Card>
+  );
+}
+function fmtMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GBP",
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currency || "GBP"} ${amount.toFixed(2)}`;
+  }
+}
+// ------------------------------------------------------------- pricing tab
+function PricingTab({
+  workspace,
+  packages,
+  pricingSubmissions,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  packages: PublicWorkPackage[];
+  pricingSubmissions: PublicPricingSubmission[];
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  async function review(
+    submission: PublicPricingSubmission,
+    decision: "accepted" | "rejected",
+  ) {
+    setReviewing(submission.id);
+    const result = await reviewPricing({
+      data: { workspaceId: workspace.id, submissionId: submission.id, decision },
+    });
+    setReviewing(null);
+    if (result.ok) {
+      await onChanged(
+        decision === "accepted"
+          ? `Pricing of ${fmtMoney(submission.amount, submission.currency)} accepted ✓`
+          : `Pricing of ${fmtMoney(submission.amount, submission.currency)} rejected`,
+      );
+    } else {
+      await onChanged(result.error);
+    }
+  }
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        {packages.map((pkg) => {
+          const subs = pricingSubmissions.filter((s) => s.workPackageId === pkg.id);
+          return (
+            <Card key={pkg.id} className="p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-bold">{pkg.name}</h2>
+                <Badge tone={pkg.category ? "blue" : "slate"}>
+                  {pkg.category ?? "No category"}
+                </Badge>
+              </div>
+              {subs.length === 0 ? (
+                <div className="mt-4">
+                  <EmptyState
+                    title="No pricing submitted for this package yet"
+                    body="Submit a reference baseline, or wait for a participating company to quote."
+                  />
+                </div>
+              ) : (
+                <ul className="mt-4 divide-y divide-slate-100">
+                  {subs.map((s) => (
+                    <li key={s.id} className="py-3.5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-ink">
+                            {fmtMoney(s.amount, s.currency)}
+                          </p>
+                          {s.description && (
+                            <p className="mt-0.5 text-sm text-muted">{s.description}</p>
+                          )}
+                          <p className="mt-1 text-xs text-muted">
+                            Submitted by {s.submittedByEmail ?? "—"}
+                            {s.submittedAt ? ` · ${fmtDateTime(s.submittedAt)}` : ""}
+                            {s.status === "accepted" || s.status === "rejected" ? (
+                              <>
+                                {" · reviewed by "}
+                                {s.reviewedByEmail ?? "—"}
+                                {s.reviewedAt ? ` · ${fmtDateTime(s.reviewedAt)}` : ""}
+                              </>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge tone={PRICING_SUBMISSION_STATUS_TONES[s.status]}>
+                            {PRICING_SUBMISSION_STATUS_LABELS[s.status]}
+                          </Badge>
+                          {s.status === "submitted" && (
+                            <div className="flex gap-1.5">
+                              <Button
+                                size="sm"
+                                disabled={reviewing === s.id}
+                                onClick={() => review(s, "accepted")}
+                              >
+                                Accept
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={reviewing === s.id}
+                                onClick={() => review(s, "rejected")}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+      <div>
+        <NewPricingForm
+          workspaceId={workspace.id}
+          packages={packages}
+          onCreated={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+function NewPricingForm({
+  workspaceId,
+  packages,
+  onCreated,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  onCreated: (msg: string) => Promise<void>;
+}) {
+  const [workPackageId, setWorkPackageId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("GBP");
+  const [description, setDescription] = useState("");
+  const [baseline, setBaseline] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!workPackageId) {
+      setError("Choose a work package.");
+      return;
+    }
+    setError(null);
+    setPending(true);
+    const result = await submitPricing({
+      data: { workspaceId, input: { workPackageId, amount, currency, description, baseline } },
+    });
+    setPending(false);
+    if (result.ok) {
+      setAmount("");
+      setDescription("");
+      setBaseline(false);
+      await onCreated(
+        baseline
+          ? "Reference baseline recorded ✓"
+          : "Pricing submitted for review ✓",
+      );
+    } else {
+      setError(result.error);
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Submit pricing</h2>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Work package" htmlFor="pricing-pkg">
+          <Select
+            id="pricing-pkg"
+            value={workPackageId}
+            onChange={(e) => setWorkPackageId(e.target.value)}
+            required
+          >
+            <option value="">Choose a package…</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount" htmlFor="pricing-amount">
+            <Input
+              id="pricing-amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="18450.00"
+              required
+            />
+          </Field>
+          <Field label="Currency" htmlFor="pricing-currency">
+            <Input
+              id="pricing-currency"
+              value={currency}
+              maxLength={3}
+              onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+              placeholder="GBP"
+              required
+            />
+          </Field>
+        </div>
+        <Field label="Description (optional)" htmlFor="pricing-desc">
+          <Textarea
+            id="pricing-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder="Scope covered by this price…"
+          />
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            checked={baseline}
+            onChange={(e) => setBaseline(e.target.checked)}
+            className="size-4 accent-[#1769AA]"
+          />
+          Reference baseline — record as accepted (no review needed)
+        </label>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Saving…" : baseline ? "Record baseline" : "Submit for review"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+// ------------------------------------------------------------- invoices tab
+function InvoicesTab({
+  workspace,
+  packages,
+  invoices,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  packages: PublicWorkPackage[];
+  invoices: PublicInvoice[];
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const [updating, setUpdating] = useState<string | null>(null);
+  async function changeStatus(invoice: PublicInvoice, status: string) {
+    if (status === invoice.status) return;
+    setUpdating(invoice.id);
+    const result = await updateInvoiceStatus({
+      data: { workspaceId: workspace.id, invoiceId: invoice.id, status },
+    });
+    setUpdating(null);
+    if (result.ok) {
+      await onChanged(
+        `Invoice ${invoice.invoiceNumber} marked ${INVOICE_STATUS_LABELS[status as keyof typeof INVOICE_STATUS_LABELS]?.toLowerCase() ?? status} ✓`,
+      );
+    } else {
+      await onChanged(result.error);
+    }
+  }
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">Invoices</h2>
+            <Badge tone="slate">
+              {invoices.length} invoice{invoices.length === 1 ? "" : "s"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            Invoices against this contract. The client reviews them in the
+            client portal; you record payment when it lands.
+          </p>
+          {invoices.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="No invoices yet"
+                body="Create the first invoice from a work package — it starts as a draft, then gets submitted for client review."
+              />
+            </div>
+          ) : (
+            <ul className="mt-4 divide-y divide-slate-100">
+              {invoices.map((inv) => (
+                <li key={inv.id} className="py-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">
+                        {inv.invoiceNumber}
+                        {inv.title ? ` — ${inv.title}` : ""}
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted">
+                        {inv.workPackageName ?? "No work package"} ·{" "}
+                        {fmtMoney(inv.amount, inv.currency)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted">
+                        Created {fmtDate(inv.createdAt)}
+                        {inv.dueDate ? ` · due ${fmtDate(inv.dueDate)}` : ""}
+                        {inv.paymentRecordedAt
+                          ? ` · paid ${fmtDate(inv.paymentRecordedAt)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={INVOICE_STATUS_TONES[inv.status]}>
+                        {INVOICE_STATUS_LABELS[inv.status]}
+                      </Badge>
+                      <Select
+                        aria-label={`Status of ${inv.invoiceNumber}`}
+                        value={inv.status}
+                        disabled={updating === inv.id}
+                        onChange={(e) => changeStatus(inv, e.target.value)}
+                        className="w-auto text-xs"
+                      >
+                        {INVOICE_LEAD_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {INVOICE_STATUS_LABELS[s]}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <div>
+        <NewInvoiceForm
+          workspaceId={workspace.id}
+          packages={packages}
+          onCreated={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+function NewInvoiceForm({
+  workspaceId,
+  packages,
+  onCreated,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  onCreated: (msg: string) => Promise<void>;
+}) {
+  const [workPackageId, setWorkPackageId] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("GBP");
+  const [dueDate, setDueDate] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await createInvoice({
+      data: {
+        workspaceId,
+        input: { workPackageId, invoiceNumber, title, amount, currency, dueDate },
+      },
+    });
+    setPending(false);
+    if (result.ok) {
+      setInvoiceNumber("");
+      setTitle("");
+      setAmount("");
+      setDueDate("");
+      await onCreated(`Invoice ${invoiceNumber} created ✓`);
+    } else {
+      setError(result.error);
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">New invoice</h2>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Invoice number" htmlFor="inv-number">
+          <Input
+            id="inv-number"
+            value={invoiceNumber}
+            onChange={(e) => setInvoiceNumber(e.target.value)}
+            placeholder="INV-2026-0042"
+            required
+            maxLength={50}
+          />
+        </Field>
+        <Field label="Work package" htmlFor="inv-pkg">
+          <Select
+            id="inv-pkg"
+            value={workPackageId}
+            onChange={(e) => setWorkPackageId(e.target.value)}
+          >
+            <option value="">No specific package</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Title (optional)" htmlFor="inv-title">
+          <Input
+            id="inv-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Q3 HVAC servicing"
+            maxLength={200}
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount" htmlFor="inv-amount">
+            <Input
+              id="inv-amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="6150.00"
+              required
+            />
+          </Field>
+          <Field label="Currency" htmlFor="inv-currency">
+            <Input
+              id="inv-currency"
+              value={currency}
+              maxLength={3}
+              onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+              placeholder="GBP"
+              required
+            />
+          </Field>
+        </div>
+        <Field label="Due date (optional)" htmlFor="inv-due">
+          <Input
+            id="inv-due"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+          />
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Creating…" : "Create invoice"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+// ------------------------------------------------------------ approvals tab
+function ApprovalsTab({
+  workspace,
+  pricingSubmissions,
+  variations,
+  invoices,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  pricingSubmissions: PublicPricingSubmission[];
+  variations: PublicVariation[];
+  invoices: PublicInvoice[];
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const pendingPricing = pricingSubmissions.filter((s) => s.status === "submitted");
+  const pendingVariations = variations.filter((v) =>
+    ["submitted", "under_client_review", "clarification_requested"].includes(v.status),
+  );
+  const pendingInvoices = invoices.filter((i) =>
+    ["submitted", "under_review"].includes(i.status),
+  );
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  async function review(submission: PublicPricingSubmission, decision: "accepted" | "rejected") {
+    setReviewing(submission.id);
+    const result = await reviewPricing({
+      data: { workspaceId: workspace.id, submissionId: submission.id, decision },
+    });
+    setReviewing(null);
+    if (result.ok) {
+      await onChanged(
+        decision === "accepted"
+          ? `Pricing accepted ✓ (${submission.workPackageName ?? "no package"})`
+          : `Pricing rejected (${submission.workPackageName ?? "no package"})`,
+      );
+    } else {
+      await onChanged(result.error);
+    }
+  }
+  return (
+    <div className="grid gap-6">
+      <Card className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Pricing awaiting your review</h2>
+          <Badge tone={pendingPricing.length ? "amber" : "slate"}>
+            {pendingPricing.length} pending
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          Quotes submitted against work packages. Accept to fix the agreed
+          price, or reject to send it back.
+        </p>
+        {pendingPricing.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState
+              title="Nothing awaiting your review"
+              body="Submitted pricing appears here until you accept or reject it."
+            />
+          </div>
+        ) : (
+          <ul className="mt-4 divide-y divide-slate-100">
+            {pendingPricing.map((s) => (
+              <li key={s.id} className="py-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-ink">
+                      {fmtMoney(s.amount, s.currency)}
+                      <span className="font-normal text-muted">
+                        {" "}
+                        · {s.workPackageName ?? "No work package"}
+                      </span>
+                    </p>
+                    {s.description && (
+                      <p className="mt-0.5 text-sm text-muted">{s.description}</p>
+                    )}
+                    <p className="mt-1 text-xs text-muted">
+                      Submitted by {s.submittedByEmail ?? "—"}
+                      {s.submittedAt ? ` · ${fmtDateTime(s.submittedAt)}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Button
+                      size="sm"
+                      disabled={reviewing === s.id}
+                      onClick={() => review(s, "accepted")}
+                    >
+                      Accept
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={reviewing === s.id}
+                      onClick={() => review(s, "rejected")}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      <Card className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Variations awaiting client decision</h2>
+          <Badge tone={pendingVariations.length ? "amber" : "slate"}>
+            {pendingVariations.length} pending
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          Variations you've submitted are decided by the client in the client
+          portal — no action needed from you until a decision lands.
+        </p>
+        {pendingVariations.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState
+              title="No variations awaiting the client"
+              body="Submitted variations appear here until the client decides."
+            />
+          </div>
+        ) : (
+          <ul className="mt-4 divide-y divide-slate-100">
+            {pendingVariations.map((v) => (
+              <li key={v.id} className="py-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-ink">{v.title}</p>
+                    <p className="mt-0.5 text-sm text-muted">
+                      {v.workPackageName ?? "No work package"}
+                      {v.costImpact != null
+                        ? ` · ${fmtMoney(v.costImpact, "GBP")}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      Submitted {fmtDateTime(v.submittedAt ?? v.createdAt)}
+                    </p>
+                  </div>
+                  <Badge tone={VARIATION_STATUS_TONES[v.status]}>
+                    {VARIATION_STATUS_LABELS[v.status]}
+                  </Badge>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      <Card className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Invoices awaiting client approval</h2>
+          <Badge tone={pendingInvoices.length ? "amber" : "slate"}>
+            {pendingInvoices.length} pending
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          Invoices submitted for payment are reviewed by the client's finance
+          team in the client portal. Record payment on the Invoices tab once
+          approved.
+        </p>
+        {pendingInvoices.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState
+              title="No invoices awaiting approval"
+              body="Submitted invoices appear here until the client approves or rejects them."
+            />
+          </div>
+        ) : (
+          <ul className="mt-4 divide-y divide-slate-100">
+            {pendingInvoices.map((i) => (
+              <li key={i.id} className="py-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-ink">
+                      {i.invoiceNumber}
+                      <span className="font-normal text-muted">
+                        {" "}
+                        · {fmtMoney(i.amount, i.currency)}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-sm text-muted">
+                      {i.workPackageName ?? "No work package"}
+                      {i.title ? ` — ${i.title}` : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      Submitted {fmtDateTime(i.submittedAt ?? i.createdAt)}
+                    </p>
+                  </div>
+                  <Badge tone={INVOICE_STATUS_TONES[i.status]}>
+                    {INVOICE_STATUS_LABELS[i.status]}
+                  </Badge>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+// ----------------------------------------------------------- variations tab
+function VariationsTab({
+  workspace,
+  packages,
+  variations,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  packages: PublicWorkPackage[];
+  variations: PublicVariation[];
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const [updating, setUpdating] = useState<string | null>(null);
+  async function changeStatus(variation: PublicVariation, status: string) {
+    if (status === variation.status) return;
+    setUpdating(variation.id);
+    const result = await updateVariationStatus({
+      data: { workspaceId: workspace.id, variationId: variation.id, status },
+    });
+    setUpdating(null);
+    if (result.ok) {
+      await onChanged(
+        `Variation “${variation.title}” → ${VARIATION_STATUS_LABELS[status as keyof typeof VARIATION_STATUS_LABELS]?.toLowerCase() ?? status}`,
+      );
+    } else {
+      await onChanged(result.error);
+    }
+  }
+  const canSubmit = (v: PublicVariation) => v.status === "draft";
+  const canImplement = (v: PublicVariation) =>
+    v.status === "approved" || v.status === "approved_with_conditions";
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">Variations</h2>
+            <Badge tone="slate">
+              {variations.length} variation{variations.length === 1 ? "" : "s"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            Changes to the contract scope. Raise a variation, submit it for
+            client review, and mark it implemented once approved.
+          </p>
+          {variations.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="No variations yet"
+                body="Raise the first variation — extra patrols, an added service, a scope change…"
+              />
+            </div>
+          ) : (
+            <ul className="mt-4 divide-y divide-slate-100">
+              {variations.map((v) => (
+                <li key={v.id} className="py-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">{v.title}</p>
+                      {v.description && (
+                        <p className="mt-0.5 text-sm text-muted">{v.description}</p>
+                      )}
+                      <p className="mt-1 text-xs text-muted">
+                        {v.workPackageName ?? "No work package"}
+                        {v.costImpact != null
+                          ? ` · ${fmtMoney(v.costImpact, "GBP")} cost impact`
+                          : ""}
+                        {v.timeImpact ? ` · ${v.timeImpact}` : ""}
+                        {v.reason ? ` · ${v.reason}` : ""}
+                        {v.decidedByEmail && v.decidedAt
+                          ? ` · decided by ${v.decidedByEmail} on ${fmtDate(v.decidedAt)}`
+                          : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-muted">
+                        Raised {fmtDateTime(v.createdAt)}
+                        {v.submittedAt
+                          ? ` · submitted ${fmtDateTime(v.submittedAt)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={VARIATION_STATUS_TONES[v.status]}>
+                        {VARIATION_STATUS_LABELS[v.status]}
+                      </Badge>
+                      {canSubmit(v) && (
+                        <Button
+                          size="sm"
+                          disabled={updating === v.id}
+                          onClick={() => changeStatus(v, "submitted")}
+                        >
+                          Submit for review
+                        </Button>
+                      )}
+                      {canImplement(v) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === v.id}
+                          onClick={() => changeStatus(v, "implemented")}
+                        >
+                          Mark implemented
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <div>
+        <NewVariationForm
+          workspaceId={workspace.id}
+          packages={packages}
+          onCreated={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+function NewVariationForm({
+  workspaceId,
+  packages,
+  onCreated,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  onCreated: (msg: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [workPackageId, setWorkPackageId] = useState("");
+  const [reason, setReason] = useState("");
+  const [description, setDescription] = useState("");
+  const [costImpact, setCostImpact] = useState("");
+  const [timeImpact, setTimeImpact] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await createVariation({
+      data: {
+        workspaceId,
+        input: { title, workPackageId, reason, description, costImpact, timeImpact },
+      },
+    });
+    setPending(false);
+    if (result.ok) {
+      setTitle("");
+      setReason("");
+      setDescription("");
+      setCostImpact("");
+      setTimeImpact("");
+      await onCreated(`Variation “${title}” raised ✓`);
+    } else {
+      setError(result.error);
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Raise a variation</h2>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Title" htmlFor="var-title">
+          <Input
+            id="var-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Extra bank-holiday patrol cover"
+            required
+            maxLength={200}
+          />
+        </Field>
+        <Field label="Work package (optional)" htmlFor="var-pkg">
+          <Select
+            id="var-pkg"
+            value={workPackageId}
+            onChange={(e) => setWorkPackageId(e.target.value)}
+          >
+            <option value="">No specific package</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Reason (optional)" htmlFor="var-reason">
+          <Textarea
+            id="var-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            maxLength={1000}
+            placeholder="Why is this change needed…"
+          />
+        </Field>
+        <Field label="Description (optional)" htmlFor="var-desc">
+          <Textarea
+            id="var-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder="What changes…"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Cost impact (£, optional)" htmlFor="var-cost">
+            <Input
+              id="var-cost"
+              type="number"
+              step="0.01"
+              value={costImpact}
+              onChange={(e) => setCostImpact(e.target.value)}
+              placeholder="780.00"
+            />
+          </Field>
+          <Field label="Time impact (optional)" htmlFor="var-time">
+            <Input
+              id="var-time"
+              value={timeImpact}
+              onChange={(e) => setTimeImpact(e.target.value)}
+              placeholder="+3 weeks"
+              maxLength={500}
+            />
+          </Field>
+        </div>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Raising…" : "Raise variation"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
 function fmtDate(value: string | null | undefined): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -1601,5 +2584,11 @@ const AUDIT_LABELS: Record<string, string> = {
   "task.create": "Task created",
   "task.update": "Task updated",
   "milestone.update": "Milestone updated",
+  "pricing.submit": "Pricing submitted",
+  "pricing.review": "Pricing reviewed",
+  "invoice.create": "Invoice created",
+  "invoice.update": "Invoice updated",
+  "variation.create": "Variation raised",
+  "variation.update": "Variation updated",
   "demo.seed": "Demo data seeded",
 };

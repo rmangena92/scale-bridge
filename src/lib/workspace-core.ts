@@ -14,17 +14,30 @@ import { loadSessionUser } from "./auth-core";
 import type {
   AuditDetails,
   AuditEntry,
+  DocumentInput,
+  DocumentVisibility,
   InvitationResponse,
   InviteInput,
+  MilestoneStatus,
   ParticipantRole,
+  PublicDocument,
   PublicInvitation,
+  PublicMilestone,
   PublicNotification,
+  PublicTask,
   PublicWorkPackage,
   PublicWorkspace,
+  TaskInput,
+  TaskStatus,
+  WorkspaceCompany,
   WorkspaceInput,
   WorkspaceStatus,
 } from "./types";
-import { INVITATION_STATUSES } from "./types";
+import {
+  INVITATION_STATUSES,
+  MILESTONE_LEAD_STATUSES,
+  TASK_STATUSES,
+} from "./types";
 
 // ------------------------------------------------------------- result types
 export type SimpleResult =
@@ -43,6 +56,10 @@ export type WorkspaceDetailResult =
       packages: PublicWorkPackage[];
       invitations: PublicInvitation[];
       audit: AuditEntry[];
+      documents: PublicDocument[];
+      tasks: PublicTask[];
+      milestones: PublicMilestone[];
+      companies: WorkspaceCompany[];
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -223,10 +240,13 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
     const user = await loadSessionUser();
     if (!user) return { ok: false, error: "UNAUTHENTICATED" };
 
-    // One batch: workspace row, its packages, and (for the lead only) the
-    // full invitation pipeline + recent audit trail. Participants never see
-    // other participants' invitations — the queries below are RLS-scoped AND
-    // the lead-only arrays are withheld server-side for non-leads.
+    // One batch: workspace row, its packages, invitations (lead only),
+    // the full audit trail (lead only), plus the delivery-tab data —
+    // documents, tasks, milestones and the participating companies (for the
+    // task assignee picker). RLS scopes every query to the caller; the
+    // explicit workspace-access predicates are defense-in-depth. Participants
+    // never see other participants' invitations, and non-leads get no audit
+    // trail — those arrays are withheld server-side too.
     // NOTE: asUser() prepends the set_config result, so real rows start at [1].
     const detailRows = await asUser(user.id, user.role, (tx) => [
       tx`select
@@ -252,10 +272,46 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
          from invitations where workspace_id = ${workspaceId}
            and exists (select 1 from contract_workspaces cw where cw.id = invitations.workspace_id and cw.lead_contractor_id = ${user.id})
          order by created_at desc`,
-      tx`select id, action, details, created_at from audit_logs
-         where workspace_id = ${workspaceId}
-           and exists (select 1 from contract_workspaces cw where cw.id = audit_logs.workspace_id and cw.lead_contractor_id = ${user.id})
-         order by created_at desc limit 20`,
+      tx`select al.id, al.action, al.details, al.created_at, u.email as actor_email
+         from audit_logs al
+         left join users u on u.id = al.actor_id
+         where al.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = al.workspace_id and cw.lead_contractor_id = ${user.id})
+         order by al.created_at desc`,
+      tx`select d.id, d.workspace_id, d.name, d.category, d.visibility, d.status,
+                d.file_url, d.uploaded_by, d.uploaded_at, d.created_at,
+                u.email as uploaded_by_email
+         from documents d
+         left join users u on u.id = d.uploaded_by
+         where d.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = d.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i where i.workspace_id = cw.id and lower(i.email) = lower(${user.email}) and i.status in ('invited','joined','verified'))))
+         order by d.created_at desc`,
+      tx`select t.id, t.workspace_id, t.work_package_id, t.title, t.description, t.status,
+                t.assignee_company_id, t.due_date, t.created_by, t.created_at, t.updated_at,
+                wp.name as work_package_name, c.name as assignee_company_name
+         from tasks t
+         left join work_packages wp on wp.id = t.work_package_id
+         left join companies c on c.id = t.assignee_company_id
+         where t.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = t.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i where i.workspace_id = cw.id and lower(i.email) = lower(${user.email}) and i.status in ('invited','joined','verified'))))
+         order by t.created_at desc`,
+      tx`select m.id, m.workspace_id, m.work_package_id, m.name, m.description, m.status,
+                m.due_date, m.completed_at, m.created_at, m.updated_at,
+                wp.name as work_package_name
+         from milestones m
+         left join work_packages wp on wp.id = m.work_package_id
+         where m.workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw where cw.id = m.workspace_id
+             and (cw.lead_contractor_id = ${user.id} or exists (select 1 from invitations i where i.workspace_id = cw.id and lower(i.email) = lower(${user.email}) and i.status in ('invited','joined','verified'))))
+         order by m.due_date asc nulls last, m.created_at asc`,
+      tx`select distinct c.id, c.name
+         from invitations i
+         join companies c on c.id = i.company_id
+         where i.workspace_id = ${workspaceId}
+           and i.status in ('joined','verified')
+         order by c.name asc`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -296,6 +352,52 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       action: string;
       details: unknown;
       created_at: string;
+      actor_email: string | null;
+    }[];
+    const docRows = detailRows[5] as {
+      id: string;
+      workspace_id: string;
+      name: string;
+      category: string | null;
+      visibility: PublicDocument["visibility"];
+      status: string;
+      file_url: string | null;
+      uploaded_by: string | null;
+      uploaded_at: string;
+      created_at: string;
+      uploaded_by_email: string | null;
+    }[];
+    const taskRows = detailRows[6] as {
+      id: string;
+      workspace_id: string;
+      work_package_id: string | null;
+      title: string;
+      description: string | null;
+      status: TaskStatus;
+      assignee_company_id: string | null;
+      due_date: string | null;
+      created_by: string | null;
+      created_at: string;
+      updated_at: string;
+      work_package_name: string | null;
+      assignee_company_name: string | null;
+    }[];
+    const milestoneRows = detailRows[7] as {
+      id: string;
+      workspace_id: string;
+      work_package_id: string | null;
+      name: string;
+      description: string | null;
+      status: MilestoneStatus;
+      due_date: string | null;
+      completed_at: string | null;
+      created_at: string;
+      updated_at: string;
+      work_package_name: string | null;
+    }[];
+    const companyRows = detailRows[8] as {
+      id: string;
+      name: string;
     }[];
 
     const ws = wsRows[0];
@@ -338,8 +440,58 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
               ? (JSON.parse(r.details) as AuditDetails)
               : ((r.details as AuditDetails | null) ?? null),
           createdAt: String(r.created_at),
+          actorEmail: r.actor_email ?? null,
         }))
       : [];
+
+    const documents: PublicDocument[] = docRows.map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      name: r.name,
+      category: r.category,
+      visibility: r.visibility,
+      status: r.status,
+      fileUrl: r.file_url,
+      uploadedByUserId: r.uploaded_by,
+      uploadedByEmail: r.uploaded_by_email,
+      uploadedAt: String(r.uploaded_at),
+      createdAt: String(r.created_at),
+    }));
+
+    const tasks: PublicTask[] = taskRows.map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      title: r.title,
+      description: r.description,
+      status: r.status,
+      assigneeCompanyId: r.assignee_company_id,
+      assigneeCompanyName: r.assignee_company_name,
+      dueDate: r.due_date ? String(r.due_date) : null,
+      createdByUserId: r.created_by,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    }));
+
+    const milestones: PublicMilestone[] = milestoneRows.map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      name: r.name,
+      description: r.description,
+      status: r.status,
+      dueDate: r.due_date ? String(r.due_date) : null,
+      completedAt: r.completed_at ? String(r.completed_at) : null,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    }));
+
+    const companies: WorkspaceCompany[] = companyRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+    }));
 
     return {
       ok: true,
@@ -359,6 +511,10 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       packages,
       invitations,
       audit,
+      documents,
+      tasks,
+      milestones,
+      companies,
     };
   } catch (err) {
     console.error("getWorkspace failed:", err);
@@ -650,6 +806,224 @@ export async function doVerifyParticipant(
   }
 }
 
+// ----------------------------------------------------------- delivery tabs
+// Documents / tasks / milestones for the lead-contractor workspace tabs.
+// Every function: verify the actor can access the workspace (lead or an
+// invited/joined/verified participant), then write + audit in one batch.
+
+/** Workspace the actor can access (lead or participant), or null. */
+async function loadWorkspaceAccess(
+  user: { id: string; email: string; role: string },
+  workspaceId: string,
+): Promise<{ leadContractorId: string; title: string } | null> {
+  const rows = (await asUser(user.id, user.role, (tx) => [
+    tx`select cw.lead_contractor_id, cw.title from contract_workspaces cw
+       where cw.id = ${workspaceId}
+         and (cw.lead_contractor_id = ${user.id} or exists (
+           select 1 from invitations i
+           where i.workspace_id = cw.id
+             and lower(i.email) = lower(${user.email})
+             and i.status in ('invited','joined','verified')
+         ))`,
+  ]))[1] as { lead_contractor_id: string; title: string }[];
+  return rows[0]
+    ? { leadContractorId: rows[0].lead_contractor_id, title: rows[0].title }
+    : null;
+}
+
+const DOC_VISIBILITY_VALUES = new Set<DocumentVisibility>([
+  "workspace",
+  "client_visible",
+  "company_only",
+]);
+
+export async function doAddDocument(
+  workspaceId: string,
+  input: DocumentInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const name = cleanText(input.name, 200);
+  if (!name) return { ok: false, error: "Document title is required." };
+  const category = cleanText(input.category, 100) || null;
+  const url = cleanText(input.url, 1000) || null;
+  const description = cleanText(input.description, 2000) || null;
+  const accessNote = cleanText(input.accessNote, 500) || null;
+  const visibility = DOC_VISIBILITY_VALUES.has(input.visibility)
+    ? input.visibility
+    : "workspace";
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+
+    // Only the lead may share a document with the client org (client_visible)
+    // or mark it company_only; participant uploads stay workspace-private.
+    const effectiveVisibility: DocumentVisibility =
+      user.id === ws.leadContractorId ? visibility : "workspace";
+
+    const documentId = randomUUID();
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into documents
+           (id, workspace_id, lead_contractor_id, name, category, visibility, file_url, uploaded_by, status, created_at, updated_at)
+         values (${documentId}, ${workspaceId}, ${ws.leadContractorId}, ${name}, ${category},
+                 ${effectiveVisibility}, ${url}, ${user.id}, 'published', now(), now())`,
+      auditQuery(tx, user.id, "document.create", {
+        workspaceId,
+        documentId,
+        name,
+        category: category ?? null,
+        visibility: effectiveVisibility,
+        url: url ?? null,
+        description: description ?? null,
+        accessNote: accessNote ?? null,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("addDocument failed:", err);
+    return { ok: false, error: "Could not add the document." };
+  }
+}
+
+export async function doCreateTask(
+  workspaceId: string,
+  input: TaskInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const title = cleanText(input.title, 200);
+  if (!title) return { ok: false, error: "Task title is required." };
+  const description = cleanText(input.description, 2000) || null;
+  const workPackageId = cleanText(input.workPackageId, 36) || null;
+  const assigneeCompanyId = cleanText(input.assigneeCompanyId, 36) || null;
+  // Bind a real Date (postgres.js never gets a raw string next to a
+  // timestamptz column). <input type="date"> yields yyyy-mm-dd.
+  let dueDate: Date | null = null;
+  const dd = (input.dueDate ?? "").trim();
+  if (dd) {
+    const parsed = new Date(`${dd}T00:00:00Z`);
+    if (!Number.isNaN(parsed.getTime())) dueDate = parsed;
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+
+    const taskId = randomUUID();
+    await asUser(user.id, user.role, (tx) => [
+      tx`insert into tasks
+           (id, workspace_id, work_package_id, title, description, status, assignee_company_id, due_date, created_by, created_at, updated_at)
+         values (${taskId}, ${workspaceId}, ${workPackageId}, ${title}, ${description},
+                 'todo', ${assigneeCompanyId}, ${dueDate}, ${user.id}, now(), now())`,
+      auditQuery(tx, user.id, "task.create", {
+        workspaceId,
+        taskId,
+        title,
+        workPackageId: workPackageId ?? null,
+        assigneeCompanyId: assigneeCompanyId ?? null,
+        dueDate: dueDate ? dueDate.toISOString().slice(0, 10) : null,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("createTask failed:", err);
+    return { ok: false, error: "Could not create the task." };
+  }
+}
+
+export async function doUpdateTaskStatus(
+  workspaceId: string,
+  taskId: string,
+  status: TaskStatus,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  if (!TASK_STATUSES.includes(status)) {
+    return { ok: false, error: "Invalid task status." };
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select status from tasks where id = ${taskId} and workspace_id = ${workspaceId}`,
+    ]))[1] as { status: string }[];
+    if (!rows[0]) return { ok: false, error: "Task not found in this workspace." };
+    const previousStatus = rows[0].status;
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`update tasks set status = ${status}, updated_at = now()
+         where id = ${taskId} and workspace_id = ${workspaceId}`,
+      auditQuery(tx, user.id, "task.update", {
+        workspaceId,
+        taskId,
+        status,
+        previousStatus,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("updateTaskStatus failed:", err);
+    return { ok: false, error: "Could not update the task." };
+  }
+}
+
+export async function doUpdateMilestoneStatus(
+  workspaceId: string,
+  milestoneId: string,
+  status: MilestoneStatus,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  if (!(MILESTONE_LEAD_STATUSES as readonly string[]).includes(status)) {
+    return { ok: false, error: "Invalid milestone status." };
+  }
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    if (ws.leadContractorId !== user.id) {
+      return { ok: false, error: "Only the workspace lead can update milestone statuses." };
+    }
+
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      tx`select status from milestones where id = ${milestoneId} and workspace_id = ${workspaceId}`,
+    ]))[1] as { status: string }[];
+    if (!rows[0]) return { ok: false, error: "Milestone not found in this workspace." };
+    const previousStatus = rows[0].status;
+
+    await asUser(user.id, user.role, (tx) => [
+      tx`update milestones
+         set status = ${status},
+             completed_at = ${status === "completed" ? new Date() : null},
+             updated_at = now()
+         where id = ${milestoneId} and workspace_id = ${workspaceId}
+           and exists (select 1 from contract_workspaces cw
+                       where cw.id = milestones.workspace_id and cw.lead_contractor_id = ${user.id})`,
+      auditQuery(tx, user.id, "milestone.update", {
+        workspaceId,
+        milestoneId,
+        status,
+        previousStatus,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("updateMilestoneStatus failed:", err);
+    return { ok: false, error: "Could not update the milestone." };
+  }
+}
+
 // --------------------------------------------------------------- my things
 export async function doGetMyInvitations(): Promise<InvitationsResult> {
   if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
@@ -784,8 +1158,27 @@ export async function doSeedDemo(): Promise<SimpleResult> {
          values (${invIds[1]}, ${wsId}, ${user.id}, 'ops@clearviewcleaning.com', 'Clearview Cleaning', 'subcontractor', 'Cleaning — daily janitorial', ${user.id})`,
       tx`insert into invitations (id, workspace_id, lead_contractor_id, email, company_name, participant_role, work_package, created_by)
          values (${invIds[2]}, ${wsId}, ${user.id}, 'tenders@northgatesecurity.com', 'Northgate Security', 'subcontractor', 'Security — site access & patrols', ${user.id})`,
+      // Delivery-tab demo rows: a small task board (one per package) and a
+      // couple of workspace documents, so the Documents/Tasks tabs show real
+      // data on a fresh demo account.
+      tx`insert into tasks (id, workspace_id, work_package_id, title, description, status, due_date, created_by, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[0]}, 'Quarterly AHU filter change',
+                 ${"Replace filters on AHU-1 and AHU-2, log pressure drops on the BMS."},
+                 'in_progress', ${new Date("2026-09-30T00:00:00Z")}, ${user.id}, now(), now())`,
+      tx`insert into tasks (id, workspace_id, work_package_id, title, description, status, due_date, created_by, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[1]}, 'Draft Q4 cleaning rota',
+                 ${"Set the October–December rota for lobby deep-cleans and washroom coverage."},
+                 'todo', ${new Date("2026-09-25T00:00:00Z")}, ${user.id}, now(), now())`,
+      tx`insert into tasks (id, workspace_id, work_package_id, title, description, status, due_date, created_by, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${pkgIds[2]}, 'Renew security guard licences',
+                 ${"Collect updated SIA licence copies before the Q4 patrol rota sign-off."},
+                 'blocked', ${new Date("2026-10-10T00:00:00Z")}, ${user.id}, now(), now())`,
+      tx`insert into documents (id, workspace_id, lead_contractor_id, name, category, visibility, uploaded_by, status, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${user.id}, 'Cleaning Rota — Q3', 'report', 'workspace', ${user.id}, 'published', now(), now())`,
+      tx`insert into documents (id, workspace_id, lead_contractor_id, name, category, visibility, uploaded_by, status, created_at, updated_at)
+         values (${randomUUID()}, ${wsId}, ${user.id}, 'Security Incident Log Template', 'other', 'workspace', ${user.id}, 'published', now(), now())`,
       auditQuery(tx, user.id, "workspace.create", { workspaceId: wsId, title: DEMO_WORKSPACE_TITLE, status: "active", demo: true }),
-      auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3 }),
+      auditQuery(tx, user.id, "demo.seed", { workspaceId: wsId, packages: 3, invitations: 3, tasks: 3, documents: 2 }),
     ]);
     return { ok: true };
   } catch (err) {

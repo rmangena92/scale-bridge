@@ -187,6 +187,25 @@ export const SCHEMA_SQL: string[] = [
   `alter table contract_workspaces add column if not exists start_date date`,
   `alter table contract_workspaces add column if not exists end_date date`,
 
+  // Lead-contractor delivery task board (workspace Tasks tab). Created_by
+  // records the actor; work_package_id links a task to a package; assignee
+  // company is optional. RLS mirrors work_packages: the lead manages, any
+  // participant (invited/joined/verified) can read and contribute.
+  `create table if not exists tasks (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    work_package_id uuid references work_packages(id) on delete set null,
+    title text not null,
+    description text,
+    status text not null default 'todo'
+      check (status in ('todo','in_progress','done','blocked')),
+    assignee_company_id uuid references companies(id) on delete set null,
+    due_date timestamptz,
+    created_by uuid references users(id) on delete set null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+
   // Per-user notification inbox. Rows are written by server functions on
   // invitation/accept/decline/verify events (the insert policy allows the
   // lead to notify people they invited, and invitees to notify the lead in
@@ -655,6 +674,8 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists documents_visibility_idx on documents (visibility)`,
   `create index if not exists documents_lead_idx on documents (lead_contractor_id)`,
   `create index if not exists documents_client_org_idx on documents (client_org_id)`,
+  `create index if not exists tasks_workspace_id_idx on tasks (workspace_id)`,
+  `create index if not exists tasks_status_idx on tasks (status)`,
 
   // ------------------------------------------------------------------
   // Row Level Security
@@ -694,6 +715,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices enable row level security`,
   `alter table progress_reports enable row level security`,
   `alter table documents enable row level security`,
+  `alter table tasks enable row level security`,
   `alter table company_notes enable row level security`,
   `alter table messages enable row level security`,
   `alter table message_reads enable row level security`,
@@ -709,6 +731,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices force row level security`,
   `alter table progress_reports force row level security`,
   `alter table documents force row level security`,
+  `alter table tasks force row level security`,
   `alter table company_notes force row level security`,
   `alter table messages force row level security`,
   `alter table message_reads force row level security`,
@@ -994,6 +1017,93 @@ export const SCHEMA_SQL: string[] = [
       join client_org_members m on m.org_id = cc.client_org_id
       where cc.contract_workspaces_id = work_packages.workspace_id
         and m.user_id = ${UID}
+    )
+  )`,
+
+  // --- tasks (lead-contractor delivery board): the workspace lead manages;
+  // any participant (invited/joined/verified) can read and contribute; only
+  // the lead (or an admin) deletes. Mirrors the work_packages policy shape:
+  // tasks -> contract_workspaces -> invitations -> users stays acyclic.
+  `drop policy if exists tasks_select on tasks`,
+  `create policy tasks_select on tasks for select using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = tasks.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists tasks_insert on tasks`,
+  `create policy tasks_insert on tasks for insert with check (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = tasks.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists tasks_update on tasks`,
+  `create policy tasks_update on tasks for update using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = tasks.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  ) with check (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = tasks.workspace_id
+        and (
+          cw.lead_contractor_id = ${UID}
+          or exists (
+            select 1 from invitations i
+            where i.workspace_id = cw.id
+              and i.status in ('invited','joined','verified')
+              and lower(i.email) = (
+                select lower(u.email) from users u where u.id = ${UID}
+              )
+          )
+        )
+    )
+  )`,
+  `drop policy if exists tasks_delete on tasks`,
+  `create policy tasks_delete on tasks for delete using (
+    ${IS_ADMIN}
+    or exists (
+      select 1 from contract_workspaces cw
+      where cw.id = tasks.workspace_id and cw.lead_contractor_id = ${UID}
     )
   )`,
 

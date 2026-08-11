@@ -17,35 +17,62 @@ import {
 } from "~/components/ui";
 import { getSessionUser } from "~/lib/auth";
 import {
+  addDocument,
+  createTask,
   createWorkPackage,
   deleteWorkPackage,
   getWorkspace,
   inviteCompany,
+  updateMilestoneStatus,
+  updateTaskStatus,
   updateWorkspace,
   verifyParticipant,
 } from "~/lib/workspace";
 import {
+  CLIENT_DOCUMENT_STATUS_LABELS,
+  CLIENT_DOCUMENT_STATUS_TONES,
+  DOCUMENT_CATEGORIES,
+  DOCUMENT_CATEGORY_LABELS,
+  DOCUMENT_VISIBILITIES,
+  DOCUMENT_VISIBILITY_LABELS,
+  DOCUMENT_VISIBILITY_TONES,
   INVITATION_BADGE_TONES,
   INVITATION_STATUS_LABELS,
+  MILESTONE_LEAD_STATUSES,
+  MILESTONE_STATUS_LABELS,
+  MILESTONE_STATUS_TONES,
   PARTICIPANT_ROLE_LABELS,
   PARTICIPANT_ROLES,
+  TASK_STATUSES,
+  TASK_STATUS_LABELS,
+  TASK_STATUS_TONES,
   WORKSPACE_BADGE_TONES,
   WORKSPACE_STATUSES,
   WORKSPACE_STATUS_LABELS,
 } from "~/lib/types";
 import type {
   AuditEntry,
+  ClientDocumentStatus,
+  DocumentCategory,
+  DocumentVisibility,
+  MilestoneStatus,
   ParticipantRole,
+  PublicDocument,
   PublicInvitation,
+  PublicMilestone,
+  PublicTask,
   PublicUser,
   PublicWorkPackage,
   PublicWorkspace,
+  TaskStatus,
+  WorkspaceCompany,
   WorkspaceStatus,
 } from "~/lib/types";
 import type { WorkspaceDetailResult } from "~/lib/workspace";
 
-// Spec tab order — the first three are implemented this phase; the rest are
-// scaffolded as disabled placeholders so the structure matches the spec.
+// Spec tab order — seven tabs are live this phase (overview, companies,
+// packages, documents, tasks, milestones, audit); the rest are scaffolded as
+// disabled placeholders so the structure matches the spec.
 const TAB_ORDER = [
   "overview",
   "companies",
@@ -82,7 +109,15 @@ const TAB_LABELS: Record<TabId, string> = {
   settings: "Settings",
 };
 
-const ACTIVE_TABS: TabId[] = ["overview", "companies", "packages"];
+const ACTIVE_TABS: TabId[] = [
+  "overview",
+  "companies",
+  "packages",
+  "documents",
+  "tasks",
+  "milestones",
+  "audit",
+];
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   loader: async ({ params }) => {
@@ -173,7 +208,17 @@ function WorkspaceBody({
     if (result.ok) setData(result);
   }
 
-  const { workspace, isLead, packages, invitations, audit } = data;
+  const {
+    workspace,
+    isLead,
+    packages,
+    invitations,
+    audit,
+    documents,
+    tasks,
+    milestones,
+    companies,
+  } = data;
 
   return (
     <AppShell user={user}>
@@ -293,6 +338,50 @@ function WorkspaceBody({
             await refresh();
           }}
         />
+      )}
+      {tab === "documents" && (
+        <DocumentsTab
+          workspace={workspace}
+          documents={documents}
+          isLead={isLead}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "tasks" && (
+        <TasksTab
+          workspace={workspace}
+          tasks={tasks}
+          packages={packages}
+          companies={companies}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "milestones" && (
+        <MilestonesTab
+          workspace={workspace}
+          milestones={milestones}
+          isLead={isLead}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "audit" && isLead && <AuditLogTab audit={audit} />}
+      {tab === "audit" && !isLead && (
+        <Card className="p-8 text-center">
+          <p className="text-sm text-muted">
+            The audit trail is private to the lead contractor — actions you
+            take in this workspace are logged, but the full log isn't shared
+            with participants.
+          </p>
+        </Card>
       )}
       {!ACTIVE_TABS.includes(tab) && <PlaceholderTab tab={tab} />}
     </AppShell>
@@ -860,6 +949,645 @@ function NewPackageForm({
   );
 }
 
+// ------------------------------------------------------------ documents tab
+function DocumentsTab({
+  workspace,
+  documents,
+  isLead,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  documents: PublicDocument[];
+  isLead: boolean;
+  onChanged: (message: string) => Promise<void>;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">Document library</h2>
+            <Badge tone="slate">
+              {documents.length} document{documents.length === 1 ? "" : "s"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            Contract documents shared inside this workspace. Client-visible
+            documents also appear in the client portal; company-only documents
+            stay private to the company that uploaded them.
+          </p>
+          {documents.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="No documents yet"
+                body="Add the first document — contracts, SLAs, method statements, licences, insurance…"
+              />
+            </div>
+          ) : (
+            <ul className="mt-4 divide-y divide-slate-100">
+              {documents.map((d) => (
+                <li key={d.id} className="py-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">{d.name}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        {DOCUMENT_CATEGORY_LABELS[d.category as DocumentCategory] ??
+                          d.category ??
+                          "General"}{" "}
+                        · uploaded {fmtDate(d.uploadedAt)} by{" "}
+                        {d.uploadedByEmail ?? "a participant"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Badge
+                        tone={
+                          CLIENT_DOCUMENT_STATUS_TONES[
+                            d.status as ClientDocumentStatus
+                          ] ?? "slate"
+                        }
+                      >
+                        {CLIENT_DOCUMENT_STATUS_LABELS[
+                          d.status as ClientDocumentStatus
+                        ] ?? d.status}
+                      </Badge>
+                      <Badge tone={DOCUMENT_VISIBILITY_TONES[d.visibility]}>
+                        {DOCUMENT_VISIBILITY_LABELS[d.visibility]}
+                      </Badge>
+                    </div>
+                  </div>
+                  {d.fileUrl ? (
+                    <a
+                      href={d.fileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1.5 inline-block text-xs font-semibold text-brand hover:underline"
+                    >
+                      View document ↗
+                    </a>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-muted">
+                      Metadata record — no file attached.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <div>
+        <AddDocumentForm
+          workspaceId={workspace.id}
+          isLead={isLead}
+          onAdded={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+function AddDocumentForm({
+  workspaceId,
+  isLead,
+  onAdded,
+}: {
+  workspaceId: string;
+  isLead: boolean;
+  onAdded: (message: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<string>("contract");
+  const [description, setDescription] = useState("");
+  const [url, setUrl] = useState("");
+  const [accessNote, setAccessNote] = useState("");
+  const [visibility, setVisibility] = useState<DocumentVisibility>("workspace");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await addDocument({
+      data: {
+        workspaceId,
+        input: { name, category, description, url, accessNote, visibility },
+      },
+    });
+    setPending(false);
+    if (result.ok) {
+      setName("");
+      setCategory("contract");
+      setDescription("");
+      setUrl("");
+      setAccessNote("");
+      setVisibility("workspace");
+      await onAdded(`Document “${name}” added ✓`);
+    } else {
+      setError(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Add a document</h2>
+      <p className="mt-1 text-sm text-muted">
+        Record a document in the workspace library — with or without a file
+        link. Metadata-only rows stay visible to the right people.
+      </p>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Title" htmlFor="doc-title">
+          <Input
+            id="doc-title"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="SLA Schedule — Riverside Plaza"
+            required
+            maxLength={200}
+          />
+        </Field>
+        <Field label="Type" htmlFor="doc-type">
+          <Select
+            id="doc-type"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
+            {DOCUMENT_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {DOCUMENT_CATEGORY_LABELS[c]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Description (optional)" htmlFor="doc-desc">
+          <Textarea
+            id="doc-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder="What this document covers…"
+          />
+        </Field>
+        <Field label="File URL (optional)" htmlFor="doc-url">
+          <Input
+            id="doc-url"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            maxLength={1000}
+          />
+        </Field>
+        {isLead && (
+          <Field label="Visibility" htmlFor="doc-vis">
+            <Select
+              id="doc-vis"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as DocumentVisibility)}
+            >
+              {DOCUMENT_VISIBILITIES.map((v) => (
+                <option key={v} value={v}>
+                  {DOCUMENT_VISIBILITY_LABELS[v]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label="Access note (optional)" htmlFor="doc-note">
+          <Input
+            id="doc-note"
+            value={accessNote}
+            onChange={(e) => setAccessNote(e.target.value)}
+            placeholder="e.g. shared with the client finance team"
+            maxLength={500}
+          />
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Adding…" : "Add document"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- tasks tab
+function TasksTab({
+  workspace,
+  tasks,
+  packages,
+  companies,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  tasks: PublicTask[];
+  packages: PublicWorkPackage[];
+  companies: WorkspaceCompany[];
+  onChanged: (message: string) => Promise<void>;
+}) {
+  const [updating, setUpdating] = useState<string | null>(null);
+  async function changeStatus(task: PublicTask, status: TaskStatus) {
+    if (status === task.status) return;
+    setUpdating(task.id);
+    const result = await updateTaskStatus({
+      data: { workspaceId: workspace.id, taskId: task.id, status },
+    });
+    setUpdating(null);
+    if (result.ok) {
+      await onChanged(
+        `Task “${task.title}” marked ${TASK_STATUS_LABELS[status].toLowerCase()} ✓`,
+      );
+    } else {
+      await onChanged(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  return (
+    <div className="grid gap-6 lg:grid-cols-3">
+      <div className="flex flex-col gap-6 lg:col-span-2">
+        <Card className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold">Task board</h2>
+            <Badge tone="slate">
+              {tasks.length} task{tasks.length === 1 ? "" : "s"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted">
+            Delivery tasks for this workspace. Anyone in the workspace can
+            update a task's status; every change is audit-logged.
+          </p>
+          {tasks.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="No tasks yet"
+                body="Create the first task — a filter change, a rota draft, a licence renewal…"
+              />
+            </div>
+          ) : (
+            <ul className="mt-4 divide-y divide-slate-100">
+              {tasks.map((t) => (
+                <li key={t.id} className="py-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">{t.title}</p>
+                      {t.description && (
+                        <p className="mt-0.5 text-sm text-muted">
+                          {t.description}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-muted">
+                        {t.workPackageName ?? "No work package"}
+                        {t.assigneeCompanyName ? ` · ${t.assigneeCompanyName}` : ""}
+                        {t.dueDate ? ` · due ${fmtDate(t.dueDate)}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={TASK_STATUS_TONES[t.status]}>
+                        {TASK_STATUS_LABELS[t.status]}
+                      </Badge>
+                      <Select
+                        aria-label={`Status of ${t.title}`}
+                        value={t.status}
+                        disabled={updating === t.id}
+                        onChange={(e) =>
+                          changeStatus(t, e.target.value as TaskStatus)
+                        }
+                        className="w-auto text-xs"
+                      >
+                        {TASK_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {TASK_STATUS_LABELS[s]}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <div>
+        <NewTaskForm
+          workspaceId={workspace.id}
+          packages={packages}
+          companies={companies}
+          onCreated={async (msg) => onChanged(msg)}
+        />
+      </div>
+    </div>
+  );
+}
+function NewTaskForm({
+  workspaceId,
+  packages,
+  companies,
+  onCreated,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  companies: WorkspaceCompany[];
+  onCreated: (message: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [workPackageId, setWorkPackageId] = useState("");
+  const [assigneeCompanyId, setAssigneeCompanyId] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    const result = await createTask({
+      data: {
+        workspaceId,
+        input: { title, description, workPackageId, assigneeCompanyId, dueDate },
+      },
+    });
+    setPending(false);
+    if (result.ok) {
+      setTitle("");
+      setDescription("");
+      setWorkPackageId("");
+      setAssigneeCompanyId("");
+      setDueDate("");
+      await onCreated(`Task “${title}” created ✓`);
+    } else {
+      setError(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">New task</h2>
+      <form onSubmit={onSubmit} className="mt-5 flex flex-col gap-4">
+        <Field label="Title" htmlFor="task-title">
+          <Input
+            id="task-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Quarterly AHU filter change"
+            required
+            maxLength={200}
+          />
+        </Field>
+        <Field label="Description (optional)" htmlFor="task-desc">
+          <Textarea
+            id="task-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder="What needs to happen, and by whom…"
+          />
+        </Field>
+        <Field label="Work package (optional)" htmlFor="task-pkg">
+          <Select
+            id="task-pkg"
+            value={workPackageId}
+            onChange={(e) => setWorkPackageId(e.target.value)}
+          >
+            <option value="">No specific package</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {companies.length > 0 && (
+          <Field label="Assignee company (optional)" htmlFor="task-company">
+            <Select
+              id="task-company"
+              value={assigneeCompanyId}
+              onChange={(e) => setAssigneeCompanyId(e.target.value)}
+            >
+              <option value="">Unassigned</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <Field label="Due date (optional)" htmlFor="task-due">
+          <Input
+            id="task-due"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+          />
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button type="submit" disabled={pending}>
+          {pending ? "Creating…" : "Create task"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+// ----------------------------------------------------------- milestones tab
+function MilestonesTab({
+  workspace,
+  milestones,
+  isLead,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  milestones: PublicMilestone[];
+  isLead: boolean;
+  onChanged: (message: string) => Promise<void>;
+}) {
+  const [updating, setUpdating] = useState<string | null>(null);
+  async function changeStatus(m: PublicMilestone, status: MilestoneStatus) {
+    if (status === m.status) return;
+    setUpdating(m.id);
+    const result = await updateMilestoneStatus({
+      data: { workspaceId: workspace.id, milestoneId: m.id, status },
+    });
+    setUpdating(null);
+    if (result.ok) {
+      await onChanged(
+        `Milestone “${m.name}” moved to ${MILESTONE_STATUS_LABELS[status]} ✓`,
+      );
+    } else {
+      await onChanged(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold">Milestones</h2>
+        <Badge tone="slate">
+          {milestones.length} milestone{milestones.length === 1 ? "" : "s"}
+        </Badge>
+      </div>
+      <p className="mt-1 text-sm text-muted">
+        Delivery milestones for this contract.{" "}
+        {isLead
+          ? "Update their status from here; formal client review and approval happen in the client portal."
+          : "The lead contractor manages status; formal client review and approval happen in the client portal."}
+      </p>
+      {milestones.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState
+            title="No milestones yet"
+            body="Milestones appear here once they're defined for the contract."
+          />
+        </div>
+      ) : (
+        <ul className="mt-4 divide-y divide-slate-100">
+          {milestones.map((m) => {
+            const options = (
+              MILESTONE_LEAD_STATUSES as readonly MilestoneStatus[]
+            ).includes(m.status)
+              ? MILESTONE_LEAD_STATUSES
+              : ([m.status, ...MILESTONE_LEAD_STATUSES] as MilestoneStatus[]);
+            return (
+              <li key={m.id} className="py-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-ink">{m.name}</p>
+                      <Badge tone={MILESTONE_STATUS_TONES[m.status]}>
+                        {MILESTONE_STATUS_LABELS[m.status]}
+                      </Badge>
+                    </div>
+                    {m.description && (
+                      <p className="mt-0.5 text-sm text-muted">
+                        {m.description}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-muted">
+                      {m.workPackageName ?? "No work package"}
+                      {m.dueDate ? ` · due ${fmtDate(m.dueDate)}` : ""}
+                      {m.completedAt
+                        ? ` · completed ${fmtDate(m.completedAt)}`
+                        : ""}
+                    </p>
+                  </div>
+                  {isLead && (
+                    <Select
+                      aria-label={`Status of ${m.name}`}
+                      value={m.status}
+                      disabled={updating === m.id}
+                      onChange={(e) =>
+                        changeStatus(m, e.target.value as MilestoneStatus)
+                      }
+                      className="w-auto text-xs"
+                    >
+                      {options.map((s) => (
+                        <option key={s} value={s}>
+                          {MILESTONE_STATUS_LABELS[s]}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------ audit log tab
+function AuditLogTab({ audit }: { audit: AuditEntry[] }) {
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-bold">Audit log</h2>
+        <Badge tone="slate">
+          {audit.length} event{audit.length === 1 ? "" : "s"}
+        </Badge>
+      </div>
+      <p className="mt-1 text-sm text-muted">
+        Every action taken in this workspace, newest first. Only the lead
+        contractor sees the full trail.
+      </p>
+      {audit.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState
+            title="No activity yet"
+            body="Actions like document uploads, task updates and invitations are logged here automatically."
+          />
+        </div>
+      ) : (
+        <ul className="mt-4 divide-y divide-slate-100">
+          {audit.map((a) => (
+            <li key={a.id} className="py-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-ink">
+                    {AUDIT_LABELS[a.action] ?? a.action}
+                  </p>
+                  {a.details && (
+                    <p className="mt-0.5 text-xs text-muted">
+                      {Object.entries(a.details)
+                        .filter(([, v]) => v !== null && v !== "")
+                        .map(
+                          ([k, v]) =>
+                            `${k
+                              .replace(/([A-Z])/g, " $1")
+                              .toLowerCase()}: ${v}`,
+                        )
+                        .join(" · ")
+                        .slice(0, 240)}
+                    </p>
+                  )}
+                </div>
+                <div className="shrink-0 text-right text-xs text-muted">
+                  <p>{a.actorEmail ?? "system"}</p>
+                  <p className="mt-0.5">{fmtDateTime(a.createdAt)}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+function fmtDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+function fmtDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 const AUDIT_LABELS: Record<string, string> = {
   "workspace.create": "Workspace created",
   "workspace.update": "Workspace updated",
@@ -869,5 +1597,9 @@ const AUDIT_LABELS: Record<string, string> = {
   "invitation.accept": "Invitation accepted",
   "invitation.decline": "Invitation declined",
   "invitation.verify": "Participant verified",
+  "document.create": "Document added",
+  "task.create": "Task created",
+  "task.update": "Task updated",
+  "milestone.update": "Milestone updated",
   "demo.seed": "Demo data seeded",
 };

@@ -12,6 +12,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import {
+  doAddDocument,
+  doCreateTask,
   doCreateWorkPackage,
   doCreateWorkspace,
   doDeleteWorkPackage,
@@ -22,12 +24,18 @@ import {
   doInviteCompany,
   doRespondToInvitation,
   doSeedDemo,
+  doUpdateMilestoneStatus,
+  doUpdateTaskStatus,
   doUpdateWorkspace,
   doVerifyParticipant,
 } from "./workspace-core";
 import type {
+  DocumentInput,
   InvitationResponse,
   InviteInput,
+  MilestoneStatus,
+  TaskInput,
+  TaskStatus,
   WorkPackageInput,
   WorkspaceInput,
 } from "./types";
@@ -92,6 +100,32 @@ export const verifyParticipant = createServerFn({ method: "POST" })
       d as { workspaceId: string; invitationId: string },
   )
   .handler(({ data }) => doVerifyParticipant(data.workspaceId, data.invitationId));
+
+export const addDocument = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { workspaceId: string; input: DocumentInput },
+  )
+  .handler(({ data }) => doAddDocument(data.workspaceId, data.input));
+
+export const createTask = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { workspaceId: string; input: TaskInput },
+  )
+  .handler(({ data }) => doCreateTask(data.workspaceId, data.input));
+
+export const updateTaskStatus = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; taskId: string; status: TaskStatus },
+  )
+  .handler(({ data }) => doUpdateTaskStatus(data.workspaceId, data.taskId, data.status));
+
+export const updateMilestoneStatus = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { workspaceId: string; milestoneId: string; status: MilestoneStatus },
+  )
+  .handler(({ data }) => doUpdateMilestoneStatus(data.workspaceId, data.milestoneId, data.status));
 
 export const listMyInvitations = createServerFn({ method: "GET" }).handler(() =>
   doGetMyInvitations(),

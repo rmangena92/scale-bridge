@@ -237,6 +237,217 @@ export type AuditEntry = {
   action: string;
   details: AuditDetails | null;
   createdAt: string;
+  /** Email of the actor (joined from users) — null when the actor is gone. */
+  actorEmail: string | null;
+};
+
+// ------------------------------------------------- workspace delivery (tabs)
+// Documents / tasks / milestones as shown in the lead-contractor workspace
+// tabs. The tables are shared with the client portal (Part B/C); these types
+// are the lead-side view.
+
+/** A workspace document row (documents table, lead-side view). */
+export type PublicDocument = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  category: string | null;
+  visibility: "workspace" | "client_visible" | "company_only";
+  status: string; // documents.status ('draft'|'published'|'under_review'|'approved'|'needs_changes')
+  fileUrl: string | null;
+  uploadedByUserId: string | null;
+  uploadedByEmail: string | null;
+  uploadedAt: string;
+  createdAt: string;
+};
+
+/** Category choices offered by the lead-side "add document" form. */
+export const DOCUMENT_CATEGORIES = [
+  "contract",
+  "sla",
+  "method_statement",
+  "safety",
+  "report",
+  "licence",
+  "insurance",
+  "scope",
+  "other",
+] as const;
+
+export type DocumentCategory = (typeof DOCUMENT_CATEGORIES)[number];
+
+export const DOCUMENT_CATEGORY_LABELS: Record<DocumentCategory, string> = {
+  contract: "Contract",
+  sla: "SLA",
+  method_statement: "Method statement",
+  safety: "Safety",
+  report: "Report",
+  licence: "Licence",
+  insurance: "Insurance",
+  scope: "Scope of works",
+  other: "Other",
+};
+
+export const DOCUMENT_VISIBILITIES = [
+  "workspace",
+  "client_visible",
+  "company_only",
+] as const;
+
+export type DocumentVisibility = (typeof DOCUMENT_VISIBILITIES)[number];
+
+export const DOCUMENT_VISIBILITY_LABELS: Record<DocumentVisibility, string> = {
+  workspace: "Workspace",
+  client_visible: "Client visible",
+  company_only: "Company only",
+};
+
+export const DOCUMENT_VISIBILITY_TONES: Record<
+  DocumentVisibility,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  workspace: "blue",
+  client_visible: "teal",
+  company_only: "navy",
+};
+
+export type DocumentInput = {
+  name: string;
+  category: string;
+  description: string;
+  url: string;
+  accessNote: string;
+  visibility: DocumentVisibility;
+};
+
+/** A delivery task on the workspace task board (tasks table). */
+export const TASK_STATUSES = [
+  "todo",
+  "in_progress",
+  "done",
+  "blocked",
+] as const;
+
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: "To do",
+  in_progress: "In progress",
+  done: "Done",
+  blocked: "Blocked",
+};
+
+export const TASK_STATUS_TONES: Record<
+  TaskStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  todo: "slate",
+  in_progress: "blue",
+  done: "green",
+  blocked: "red",
+};
+
+export type PublicTask = {
+  id: string;
+  workspaceId: string;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  assigneeCompanyId: string | null;
+  assigneeCompanyName: string | null;
+  dueDate: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskInput = {
+  title: string;
+  description: string;
+  workPackageId: string;
+  assigneeCompanyId: string;
+  dueDate: string; // yyyy-mm-dd from <input type="date">, '' = none
+};
+
+/** A delivery milestone (milestones table) as shown to the lead / participants. */
+export const MILESTONE_STATUSES = [
+  "upcoming",
+  "in_progress",
+  "submitted_for_review",
+  "approved",
+  "rejected",
+  "requires_clarification",
+  "delayed",
+  "completed",
+  "planned",
+  "submitted",
+  "needs_changes",
+] as const;
+
+export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+
+export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
+  upcoming: "Upcoming",
+  in_progress: "In progress",
+  submitted_for_review: "Submitted for review",
+  approved: "Approved",
+  rejected: "Rejected",
+  requires_clarification: "Clarification requested",
+  delayed: "Delayed",
+  completed: "Completed",
+  planned: "Planned",
+  submitted: "Submitted",
+  needs_changes: "Needs changes",
+};
+
+export const MILESTONE_STATUS_TONES: Record<
+  MilestoneStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  upcoming: "slate",
+  in_progress: "blue",
+  submitted_for_review: "amber",
+  approved: "teal",
+  rejected: "red",
+  requires_clarification: "amber",
+  delayed: "red",
+  completed: "green",
+  planned: "slate",
+  submitted: "amber",
+  needs_changes: "red",
+};
+
+/** Statuses the workspace lead may set directly (client review is separate). */
+export const MILESTONE_LEAD_STATUSES = [
+  "upcoming",
+  "in_progress",
+  "submitted_for_review",
+  "delayed",
+  "completed",
+] as const;
+
+export type MilestoneLeadStatus = (typeof MILESTONE_LEAD_STATUSES)[number];
+
+export type PublicMilestone = {
+  id: string;
+  workspaceId: string;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  name: string;
+  description: string | null;
+  status: MilestoneStatus;
+  dueDate: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Company participating in the workspace (for task assignee picker). */
+export type WorkspaceCompany = {
+  id: string;
+  name: string;
 };
 
 // -------------------------------------------------------------- admin portal

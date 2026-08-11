@@ -77,6 +77,8 @@ export type WorkspaceDetailResult =
       participantVerifications: ParticipantVerification[];
       messages: PublicWorkspaceMessage[];
       unreadMessageCount: number;
+      notifications: PublicNotification[];
+      unreadNotificationCount: number;
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -442,6 +444,17 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
                and i.status in ('invited','joined','verified')
            ))
          order by m.created_at asc, m.id asc`,
+      // Workspace Notifications tab: the caller's own notification rows for
+      // THIS workspace (newest first) plus the unread count for the tab
+      // badge. RLS scopes both to the caller's own inbox (user_id).
+      tx`select n.id, n.type, n.title, n.body, n.link, n.read_at, n.created_at
+         from notifications n
+         where n.user_id = ${user.id} and n.workspace_id = ${workspaceId}
+         order by n.created_at desc, n.id desc
+         limit 50`,
+      tx`select count(*)::int as n from notifications
+         where user_id = ${user.id} and workspace_id = ${workspaceId}
+           and read_at is null`,
     ]);
     const wsRows = detailRows[1] as {
       id: string;
@@ -627,6 +640,16 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       is_lead: boolean;
       last_read_at: string | null;
     }[];
+    const notificationRows = detailRows[15] as {
+      id: string;
+      type: string;
+      title: string;
+      body: string | null;
+      link: string | null;
+      read_at: string | null;
+      created_at: string;
+    }[];
+    const unreadNotifRows = detailRows[16] as { n: number }[];
 
     const ws = wsRows[0];
     if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
@@ -844,6 +867,17 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
         new Date(r.created_at).getTime() <= new Date(r.last_read_at).getTime(),
     }));
     const unreadMessageCount = messages.filter((m) => !m.read).length;
+    const notifications: PublicNotification[] = notificationRows.map((r) => ({
+      id: r.id,
+      workspaceId: workspaceId,
+      type: r.type,
+      title: r.title,
+      body: r.body,
+      link: r.link,
+      readAt: r.read_at ? String(r.read_at) : null,
+      createdAt: String(r.created_at),
+    }));
+    const unreadNotificationCount = unreadNotifRows[0]?.n ?? 0;
     return {
       ok: true,
       workspace: {
@@ -872,6 +906,8 @@ export async function doGetWorkspace(workspaceId: string): Promise<WorkspaceDeta
       participantVerifications,
       messages,
       unreadMessageCount,
+      notifications,
+      unreadNotificationCount,
     };
   } catch (err) {
     console.error("getWorkspace failed:", err);
@@ -1322,12 +1358,24 @@ export async function doAddDocument(
          values (${documentId}, ${workspaceId}, ${ws.leadContractorId}, ${name}, ${category},
                  ${effectiveVisibility}, ${url}, ${user.id}, ${status}, now(), now())`,
       // Submitting a verification document nudges the company's own profile
-      // from unverified → pending (owner-scoped update; RLS allows the owner).
+      // from unverified → pending (owner-scoped update; RLS allows the owner),
+      // and notifies the workspace lead so they can review it in the
+      // Companies tab (notifications insert policy: a joined/verified invitee
+      // may notify the lead of the workspace they're participating in).
       ...(isVerification && user.id !== ws.leadContractorId
         ? [
             tx`update companies
                set verification_status = 'pending', updated_at = now()
                where owner_id = ${user.id} and verification_status = 'unverified'`,
+            notifyQuery(
+              tx,
+              ws.leadContractorId,
+              workspaceId,
+              "verification.submitted",
+              "Verification document submitted",
+              `A verification document “${name}” was submitted for review.`,
+              `/workspaces/${workspaceId}?tab=companies`,
+            ),
           ]
         : []),
       auditQuery(tx, user.id, "document.create", {
@@ -1953,11 +2001,12 @@ export async function doGetMyNotifications(): Promise<NotificationsResult> {
     if (!user) return { ok: false, error: "UNAUTHENTICATED" };
 
     const rows = (await asUser(user.id, user.role, (tx) => [
-      tx`select id, type, title, body, link, read_at, created_at
+      tx`select id, workspace_id, type, title, body, link, read_at, created_at
          from notifications where user_id = ${user.id}
          order by created_at desc limit 30`,
     ]))[1] as {
       id: string;
+      workspace_id: string | null;
       type: string;
       title: string;
       body: string | null;
@@ -1970,6 +2019,7 @@ export async function doGetMyNotifications(): Promise<NotificationsResult> {
       ok: true,
       notifications: rows.map((r) => ({
         id: r.id,
+        workspaceId: r.workspace_id,
         type: r.type,
         title: r.title,
         body: r.body,
@@ -2091,6 +2141,67 @@ export async function doMarkWorkspaceMessagesRead(
   } catch (err) {
     console.error("markWorkspaceMessagesRead failed:", err);
     return { ok: false, error: "Could not update read state." };
+  }
+}
+// ------------------------------------------------------ workspace notifications
+// Workspace-scoped read tracking for the Notifications tab. The notifications
+// table is the single per-user inbox (user-scoped RLS: select/update allow the
+// owner only); the workspace_id column scopes rows to a contract workspace, so
+// each user's Notifications tab shows only this workspace's activity. Mirrors
+// the client portal's doMarkClientNotificationRead / mark-all pattern.
+export async function doMarkWorkspaceNotificationRead(input: {
+  workspaceId: string;
+  notificationId: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+    const ws = await loadWorkspaceAccess(user, input.workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    const rows = await asUser(user.id, user.role, (tx) => [
+      tx`update notifications n set read_at = now()
+         where n.id = ${input.notificationId}
+           and n.user_id = ${user.id}
+           and n.workspace_id = ${input.workspaceId}`,
+      auditQuery(tx, user.id, "workspace.notification.read", {
+        workspaceId: input.workspaceId,
+        notificationId: input.notificationId,
+      }, input.workspaceId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) {
+      return { ok: false, error: "Notification not found." };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("markWorkspaceNotificationRead failed:", err);
+    return { ok: false, error: "Could not update the notification." };
+  }
+}
+export async function doMarkAllWorkspaceNotificationsRead(
+  workspaceId: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+    const ws = await loadWorkspaceAccess(user, workspaceId);
+    if (!ws) return { ok: false, error: "Workspace not found or you don't have access." };
+    await asUser(user.id, user.role, (tx) => [
+      tx`update notifications n set read_at = now()
+         where n.user_id = ${user.id}
+           and n.workspace_id = ${workspaceId}
+           and n.read_at is null`,
+      auditQuery(tx, user.id, "workspace.notification.mark_all_read", {
+        workspaceId,
+      }, workspaceId),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("markAllWorkspaceNotificationsRead failed:", err);
+    return { ok: false, error: "Could not update your notifications." };
   }
 }
 
@@ -2279,6 +2390,81 @@ async function ensureMessagesDemo(
 }
 
 
+/**
+ * Idempotent demo block: a realistic notification inbox for the demo
+ * workspace, written through the SAME rows the live write paths produce
+ * (notifications table; types invitation.accepted / verification.submitted /
+ * new_workspace_message / participant.verified). Skips once the invitation /
+ * verification markers exist for the lead — pre-existing rows from live flows
+ * (e.g. a message notification) are left untouched. The lead's newest
+ * notification is deliberately unread so the tab badge demo shows a count.
+ */
+async function ensureNotificationsDemo(
+  lead: { id: string; role: string },
+  wsId: string,
+): Promise<void> {
+  const userRows = (await asService((tx) => [
+    tx`select id from users where lower(email) = 'bids@meridianhvac.com'`,
+  ]))[0] as { id: string }[];
+  const meridianId = userRows[0]?.id ?? null;
+  const probe = (await asUser(lead.id, lead.role, (tx) => [
+    tx`select count(*)::int as n from notifications
+       where workspace_id = ${wsId} and user_id = ${lead.id}
+         and type in ('invitation.accepted','verification.submitted')`,
+    tx`select count(*)::int as n from notifications
+       where workspace_id = ${wsId} and user_id = ${lead.id}
+         and type = 'new_workspace_message'`,
+    tx`select title from contract_workspaces where id = ${wsId}`,
+  ])) as unknown[];
+  const markers = probe[1] as { n: number }[];
+  if ((markers[0]?.n ?? 0) > 0) return; // already seeded
+  const msgCount = (probe[2] as { n: number }[])[0]?.n ?? 0;
+  const wsTitle = (probe[3] as { title: string }[])[0]?.title ?? "this workspace";
+  await asUser(lead.id, lead.role, (tx) => {
+    const qs: TxQuery[] = [
+      tx`insert into notifications (id, user_id, workspace_id, type, title, body, link, read_at, created_at)
+         values (${randomUUID()}, ${lead.id}, ${wsId}, 'invitation.accepted',
+                 ${"Invitation accepted"},
+                 ${`Clearview Cleaning accepted your invitation to join “${wsTitle}”.`},
+                 ${`/workspaces/${wsId}?tab=companies`}, now() - interval '3 days', now() - interval '3 days')`,
+      tx`insert into notifications (id, user_id, workspace_id, type, title, body, link, read_at, created_at)
+         values (${randomUUID()}, ${lead.id}, ${wsId}, 'invitation.accepted',
+                 ${"Invitation accepted"},
+                 ${`Meridian HVAC Ltd. accepted your invitation to join “${wsTitle}”.`},
+                 ${`/workspaces/${wsId}?tab=companies`}, now() - interval '2 days', now() - interval '2 days')`,
+      tx`insert into notifications (id, user_id, workspace_id, type, title, body, link, read_at, created_at)
+         values (${randomUUID()}, ${lead.id}, ${wsId}, 'verification.submitted',
+                 ${"Verification document submitted"},
+                 ${`Meridian HVAC Ltd. submitted “HVAC Contractor Licence — 2026” for verification on “${wsTitle}”.`},
+                 ${`/workspaces/${wsId}?tab=companies`}, now() - interval '2 days', now() - interval '2 days')`,
+      auditQuery(tx, lead.id, "demo.seed", {
+        workspaceId: wsId,
+        notifications: 3,
+      }),
+    ];
+    if (msgCount === 0) {
+      qs.push(
+        tx`insert into notifications (id, user_id, workspace_id, type, title, body, link, read_at, created_at)
+           values (${randomUUID()}, ${lead.id}, ${wsId}, 'new_workspace_message',
+                   ${`New message on ${wsTitle}`},
+                   ${"We can take AHU-1 on the morning of 10 September: isolate the unit, replace both filter banks, pressure-test, then log the readings on the BMS."},
+                   ${`/workspaces/${wsId}?tab=messages`}, null, now() - interval '26 hours')`,
+      );
+    }
+    if (meridianId) {
+      // The participant's own row proves RLS isolation: Meridian sees their
+      // notification, never the lead's inbox.
+      qs.push(
+        tx`insert into notifications (id, user_id, workspace_id, type, title, body, link, read_at, created_at)
+           values (${randomUUID()}, ${meridianId}, ${wsId}, 'participant.verified',
+                   ${"You're now a verified participant"},
+                   ${`You've been verified as a participant on “${wsTitle}”.`},
+                   ${`/workspaces/${wsId}`}, null, now() - interval '2 days')`,
+      );
+    }
+    return qs;
+  });
+}
 // Realistic sample data for demonstration: a facilities-management contract
 // with HVAC, cleaning and security work packages and three invited companies.
 const DEMO_WORKSPACE_TITLE = "Riverside Plaza — Facilities Management";
@@ -2302,6 +2488,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       await ensureVerificationDemo(user, wsId);
       // Messages demo block (idempotent — skips once the thread exists).
       await ensureMessagesDemo(user, wsId);
+      // Notifications demo block (idempotent — skips once the markers exist).
+      await ensureNotificationsDemo(user, wsId);
       const probe = (await asUser(user.id, user.role, (tx) => [
         tx`select id, name from work_packages where workspace_id = ${wsId} order by created_at asc`,
         tx`select id from pricing_submissions where workspace_id = ${wsId} limit 1`,
@@ -2454,6 +2642,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
     await ensureVerificationDemo(user, wsId);
     // Messages demo block (idempotent — skips once the thread exists).
     await ensureMessagesDemo(user, wsId);
+    // Notifications demo block (idempotent — skips once the markers exist).
+    await ensureNotificationsDemo(user, wsId);
     return { ok: true };
   } catch (err) {
     console.error("seedDemo failed:", err);

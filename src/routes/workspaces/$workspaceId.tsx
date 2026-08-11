@@ -25,7 +25,9 @@ import {
   deleteWorkPackage,
   getWorkspace,
   inviteCompany,
+  markAllWorkspaceNotificationsRead,
   markWorkspaceMessagesRead,
+  markWorkspaceNotificationRead,
   reviewPricing,
   sendWorkspaceMessage,
   submitPricing,
@@ -78,6 +80,7 @@ import type {
   PublicDocument,
   PublicInvoice,
   PublicMilestone,
+  PublicNotification,
   PublicPricingSubmission,
   ParticipantVerification,
   PublicTask,
@@ -104,6 +107,7 @@ const TAB_ORDER = [
   "tasks",
   "milestones",
   "messages",
+  "notifications",
   "approvals",
   "variations",
   "invoices",
@@ -123,6 +127,7 @@ const TAB_LABELS: Record<TabId, string> = {
   tasks: "Tasks",
   milestones: "Milestones",
   messages: "Messages",
+  notifications: "Notifications",
   approvals: "Approvals",
   variations: "Variations",
   invoices: "Invoices",
@@ -140,6 +145,7 @@ const ACTIVE_TABS: TabId[] = [
   "tasks",
   "milestones",
   "messages",
+  "notifications",
   "approvals",
   "variations",
   "invoices",
@@ -266,6 +272,8 @@ function WorkspaceBody({
     participantVerifications,
     messages,
     unreadMessageCount,
+    notifications,
+    unreadNotificationCount,
   } = data;
 
   return (
@@ -345,6 +353,11 @@ function WorkspaceBody({
               {t === "messages" && unreadMessageCount > 0 && (
                 <span className="ml-1.5 inline-flex items-center rounded-full bg-brand px-1.5 py-0.5 align-middle text-[10px] font-bold leading-none text-white">
                   {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
+                </span>
+              )}
+              {t === "notifications" && unreadNotificationCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center rounded-full bg-brand px-1.5 py-0.5 align-middle text-[10px] font-bold leading-none text-white">
+                  {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
                 </span>
               )}
             </button>
@@ -487,6 +500,17 @@ function WorkspaceBody({
           unreadMessageCount={unreadMessageCount}
           isLead={isLead}
           userId={user.id}
+          onChanged={async (msg) => {
+            setNotice(msg);
+            await refresh();
+          }}
+        />
+      )}
+      {tab === "notifications" && (
+        <NotificationsTab
+          workspace={workspace}
+          notifications={notifications}
+          unreadNotificationCount={unreadNotificationCount}
           onChanged={async (msg) => {
             setNotice(msg);
             await refresh();
@@ -669,6 +693,151 @@ function MessageBubble({
   );
 }
 
+// ------------------------------------------------------- notifications tab
+type NotifTone = "blue" | "teal" | "green" | "amber" | "slate" | "navy";
+const NOTIFICATION_META: Record<string, { label: string; tone: NotifTone }> = {
+  new_workspace_message: { label: "New message", tone: "blue" },
+  "invitation.accepted": { label: "Invitation accepted", tone: "teal" },
+  "invitation.declined": { label: "Invitation declined", tone: "amber" },
+  "participant.verified": { label: "Participant verified", tone: "green" },
+  "verification.review": { label: "Verification review", tone: "blue" },
+  "verification.submitted": { label: "Verification submitted", tone: "amber" },
+  "pricing.reviewed": { label: "Pricing updated", tone: "navy" },
+};
+function notificationMeta(type: string): { label: string; tone: NotifTone } {
+  const known = NOTIFICATION_META[type];
+  if (known) return known;
+  return {
+    label: type
+      .replace(/[._]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase()),
+    tone: "slate",
+  };
+}
+function NotificationsTab({
+  workspace,
+  notifications,
+  unreadNotificationCount,
+  onChanged,
+}: {
+  workspace: PublicWorkspace;
+  notifications: PublicNotification[];
+  unreadNotificationCount: number;
+  onChanged: (msg: string) => Promise<void>;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function markRead(n: PublicNotification) {
+    setBusyId(n.id);
+    setError(null);
+    const result = await markWorkspaceNotificationRead({
+      data: { workspaceId: workspace.id, notificationId: n.id },
+    });
+    setBusyId(null);
+    if (result.ok) await onChanged("Notification marked as read.");
+    else setError(result.error ?? "Could not update the notification.");
+  }
+  async function markAllRead() {
+    setError(null);
+    const result = await markAllWorkspaceNotificationsRead({
+      data: { workspaceId: workspace.id },
+    });
+    if (result.ok) await onChanged("All notifications marked as read.");
+    else setError(result.error ?? "Could not update your notifications.");
+  }
+  const unread = notifications.filter((n) => !n.readAt);
+  return (
+    <Card className="p-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <div>
+          <h2 className="text-lg font-bold">Notifications</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Activity in this workspace — new messages, invitation responses and
+            verification updates.{" "}
+            {unreadNotificationCount > 0 &&
+              `${unreadNotificationCount} unread.`}
+          </p>
+        </div>
+        {unread.length > 0 && (
+          <Button variant="secondary" size="sm" onClick={markAllRead}>
+            Mark all read
+          </Button>
+        )}
+      </div>
+      {error && (
+        <div className="px-5 pt-3">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+      {notifications.length === 0 && (
+        <p className="px-6 py-12 text-center text-sm text-muted">
+          No notifications yet — new messages, invitation responses and
+          verification updates for this workspace will appear here.
+        </p>
+      )}
+      <ul className="divide-y divide-slate-100">
+        {notifications.map((n) => {
+          const meta = notificationMeta(n.type);
+          const isUnread = !n.readAt;
+          return (
+            <li
+              key={n.id}
+              className={`flex items-start gap-3 px-5 py-4 ${
+                isUnread ? "bg-mist/50" : ""
+              }`}
+            >
+              {isUnread && (
+                <span
+                  className="mt-1.5 size-2 shrink-0 rounded-full bg-brand"
+                  aria-hidden="true"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                  <span className="text-xs text-muted">
+                    {new Date(n.createdAt).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+                <p
+                  className={`mt-1 text-sm ${
+                    isUnread ? "font-semibold text-navy" : "font-medium text-ink"
+                  }`}
+                >
+                  {n.title}
+                </p>
+                {n.body && <p className="mt-0.5 text-sm text-muted">{n.body}</p>}
+                {n.link && (
+                  <Link
+                    to={n.link}
+                    className="mt-1.5 inline-block text-xs font-semibold text-brand hover:underline"
+                  >
+                    View in workspace →
+                  </Link>
+                )}
+              </div>
+              {isUnread && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busyId === n.id}
+                  onClick={() => markRead(n)}
+                >
+                  {busyId === n.id ? "Marking…" : "Mark read"}
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
 function OverviewTab({
   workspace,
   isLead,

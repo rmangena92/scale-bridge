@@ -261,6 +261,8 @@ export type ParticipantVerification = {
 // ----------------------------------------------------------- notifications
 export type PublicNotification = {
   id: string;
+  /** The workspace the notification belongs to (null = platform/global). */
+  workspaceId: string | null;
   type: string;
   title: string;
   body: string | null;

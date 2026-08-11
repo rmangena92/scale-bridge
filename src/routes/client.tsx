@@ -31,7 +31,10 @@ export const Route = createFileRoute("/client")({
       throw redirect({ to: "/client/login" });
     }
   },
-  loaderDeps: ({ search }) => ({ org: search.org }),
+  loaderDeps: ({ search, location }) => ({
+    org: search.org,
+    pathname: location.pathname,
+  }),
   loader: async ({ deps }) => {
     const session = await getClientSession();
     return {
@@ -57,7 +60,16 @@ function ClientLayout() {
       </DbSetupPage>
     );
   }
-  if (!client || !org) return null; // beforeLoad is redirecting
+  if (!client || !org) {
+    // Transitional state only (beforeLoad redirects genuinely logged-out
+    // users): renders while the fresh session loader is in flight right
+    // after login, instead of a blank page.
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-mist">
+        <p className="text-sm text-muted">Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <ClientPortalProvider client={client} org={org}>

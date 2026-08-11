@@ -23,6 +23,11 @@ export const Route = createFileRoute("/admin")({
       throw redirect({ to: "/admin/login" });
     }
   },
+  // Deps keyed on pathname: the layout route is reused when navigating from
+  // /admin/login to /admin, and without a changing dep the loader (and its
+  // freshly-minted session) would NOT re-run, leaving `admin` stale as null
+  // and rendering a blank page after login.
+  loaderDeps: ({ location }) => ({ pathname: location.pathname }),
   loader: async () => {
     const session = await getAdminSession();
     return { admin: session.admin, setupRequired: session.setupRequired };
@@ -44,7 +49,16 @@ function AdminLayout() {
       </DbSetupPage>
     );
   }
-  if (!admin) return null; // beforeLoad is redirecting
+  if (!admin) {
+    // Transitional state only (beforeLoad redirects genuinely logged-out
+    // users): renders while the fresh session loader is in flight right
+    // after login, instead of a blank page.
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-mist">
+        <p className="text-sm text-muted">Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <AdminShell admin={admin}>

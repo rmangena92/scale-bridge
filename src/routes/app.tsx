@@ -16,6 +16,7 @@ import {
   Textarea,
 } from "~/components/ui";
 import { getSessionUser, updateProfile } from "~/lib/auth";
+import { getAdminSession } from "~/lib/admin";
 import { getMyCompany, saveCompany } from "~/lib/company";
 import { listMyInvitations, listWorkspaces } from "~/lib/workspace";
 import {
@@ -39,6 +40,9 @@ export const Route = createFileRoute("/app")({
       };
     }
     if (!session.user) throw redirect({ to: "/login" });
+    // Admins get the Master Admin Portal, not this legacy workspace dashboard.
+    const adminSession = await getAdminSession();
+    if (adminSession.admin) throw redirect({ to: "/admin" });
     const companyResult = await getMyCompany();
     const [workspacesResult, invitesResult] = await Promise.all([
       listWorkspaces(),

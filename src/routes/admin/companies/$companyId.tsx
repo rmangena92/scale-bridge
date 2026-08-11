@@ -6,6 +6,7 @@ import {
   createAdminCompanyNote,
   getAdminCompanyDetail,
   getAdminSession,
+  listCompanyServices,
   setAdminCompanyStatus,
   updateAdminCompanyNote,
 } from "~/lib/admin";
@@ -16,6 +17,14 @@ import {
   WORKSPACE_STATUS_LABELS,
 } from "~/lib/types";
 import type { AdminCompanyDetail } from "~/lib/types";
+import type { CompanyServiceRow } from "~/lib/services";
+import {
+  ConfidenceBadge,
+  DecisionBadge,
+  DecisionButtons,
+  ServiceStatusBadge,
+  VerificationBadge,
+} from "~/components/CatalogueBits";
 import {
   Badge,
   Button,
@@ -30,12 +39,17 @@ import {
 export const Route = createFileRoute("/admin/companies/$companyId")({
   loader: async ({ params }) => {
     const session = await getAdminSession();
-    const detail = await getAdminCompanyDetail({ data: { companyId: params.companyId } });
+    const [detail, rels] = await Promise.all([
+      getAdminCompanyDetail({ data: { companyId: params.companyId } }),
+      listCompanyServices({ data: { companyId: params.companyId } }),
+    ]);
     return {
       setupRequired: session.setupRequired,
       admin: session.admin,
       detail: detail.ok ? detail.detail : null,
       loadError: detail.ok ? null : detail.error,
+      relationships: rels.ok ? rels.relationships : [],
+      relationshipsError: rels.ok ? null : rels.error,
     };
   },
   component: CompanyDetailPage,
@@ -54,217 +68,6 @@ const statusTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" |
   archived: "slate",
 };
 
-const CATALOGUE_NOTE = "Arrives with the services catalogue build.";
-
-type TabKey =
-  | "overview"
-  | "information"
-  | "services"
-  | "evidence"
-  | "contracts"
-  | "opportunities"
-  | "documents"
-  | "verification"
-  | "contacts"
-  | "ai"
-  | "upsells"
-  | "activity"
-  | "notes";
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "information", label: "Company Information" },
-  { key: "services", label: "Services" },
-  { key: "evidence", label: "Service Evidence" },
-  { key: "contracts", label: "Contracts" },
-  { key: "opportunities", label: "Opportunities" },
-  { key: "documents", label: "Documents" },
-  { key: "verification", label: "Verification" },
-  { key: "contacts", label: "Contacts" },
-  { key: "ai", label: "AI Insights" },
-  { key: "upsells", label: "Upsell Opportunities" },
-  { key: "activity", label: "Activity" },
-  { key: "notes", label: "Internal Notes" },
-];
-
-function CompanyDetailPage() {
-  const { setupRequired, admin, detail, loadError } = Route.useLoaderData();
-  if (setupRequired) {
-    return (
-      <DbSetupPage title="Company profile">
-        Connect a Postgres database (DATABASE_URL) to manage companies.
-      </DbSetupPage>
-    );
-  }
-  if (!admin) return null;
-  if (!detail) {
-    return (
-      <div className="mb-6">
-        <ErrorText>{loadError ?? "Company not found."}</ErrorText>
-        <Link to="/admin/companies" className="mt-4 inline-block text-sm font-semibold text-brand hover:underline">
-          ← Back to companies
-        </Link>
-      </div>
-    );
-  }
-  return <CompanyDetailBody adminCanMutate={admin.canMutate} detail={detail} />;
-}
-
-function CompanyDetailBody({
-  adminCanMutate,
-  detail,
-}: {
-  adminCanMutate: boolean;
-  detail: AdminCompanyDetail;
-}) {
-  const [status, setStatus] = useState(detail.company.verificationStatus);
-  const [tab, setTab] = useState<TabKey>("overview");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
-
-  function guard(): boolean {
-    if (!adminCanMutate) {
-      setError("Your role is read-only — changes are not permitted.");
-      setFlash(null);
-      return false;
-    }
-    setError(null);
-    setFlash(null);
-    return true;
-  }
-
-  async function runAction(action: "verify" | "reject" | "suspend" | "restore") {
-    if (!guard()) return;
-    setBusy(true);
-    const result = await setAdminCompanyStatus({
-      data: { companyId: detail.company.id, action },
-    });
-    setBusy(false);
-    if (result.ok) {
-      const next =
-        action === "verify" ? "verified" : action === "reject" ? "rejected" : action === "suspend" ? "suspended" : "registered";
-      setStatus(next);
-      setFlash(`Company ${action === "restore" ? "restored" : action + "d"} ✓`);
-    } else {
-      setError(result.error);
-    }
-  }
-
-  const c = detail.company;
-
-  return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-bold uppercase tracking-widest text-teal">Companies</p>
-          <div className="mt-1 flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold">{c.name}</h1>
-            <Badge tone={statusTones[status] ?? "slate"}>{COMPANY_STATUS_LABELS[status]}</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted">{c.type ?? "—"}</p>
-        </div>
-        <Link to="/admin/companies" className="text-sm font-semibold text-brand hover:underline">
-          ← Back to companies
-        </Link>
-      </div>
-
-      {error && (
-        <div className="mb-5">
-          <ErrorText>{error}</ErrorText>
-        </div>
-      )}
-      {flash && (
-        <p className="mb-5 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm font-medium text-success">
-          {flash}
-        </p>
-      )}
-
-      {/* tab bar */}
-      <div className="mb-6 flex flex-wrap gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[var(--shadow-card)]">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => {
-              setTab(t.key);
-              setError(null);
-              setFlash(null);
-            }}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
-              tab === t.key
-                ? "bg-navy text-white"
-                : "text-muted hover:bg-mist hover:text-navy"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "overview" && (
-        <OverviewTab detail={detail} status={status} onAction={runAction} adminCanMutate={adminCanMutate} busy={busy} onTab={setTab} />
-      )}
-      {tab === "information" && <InformationTab detail={detail} />}
-      {tab === "services" && (
-        <CatalogueEmptyState
-          title="Services"
-          body="The services catalogue (plan item 2) adds services to this company with evidence, verification status and active-with-ScaleBridge tracking."
-        />
-      )}
-      {tab === "evidence" && (
-        <CatalogueEmptyState
-          title="Service evidence"
-          body="Evidence per service — certificates, capability statements, case studies and documents — arrives with the services catalogue build."
-        />
-      )}
-      {tab === "contracts" && <ContractsTab detail={detail} />}
-      {tab === "opportunities" && (
-        <CatalogueEmptyState
-          title="Opportunities"
-          body="Contract opportunities matched to this company arrive with the services catalogue build."
-        />
-      )}
-      {tab === "documents" && <DocumentsTab detail={detail} />}
-      {tab === "verification" && <VerificationTab detail={detail} />}
-      {tab === "contacts" && <ContactsTab detail={detail} />}
-      {tab === "ai" && (
-        <CatalogueEmptyState
-          title="AI insights"
-          body="AI Service Intelligence discoveries (plan item 5) appear here with evidence and confidence levels."
-        />
-      )}
-      {tab === "upsells" && (
-        <CatalogueEmptyState
-          title="Upsell opportunities"
-          body="Human-approved upsell and cross-sell recommendations (plan item 6) appear here."
-        />
-      )}
-      {tab === "activity" && <ActivityTab detail={detail} />}
-      {tab === "notes" && (
-        <NotesTab detail={detail} adminCanMutate={adminCanMutate} />
-      )}
-    </div>
-  );
-}
-
-function SectionHeading({ title, body }: { title: string; body?: string }) {
-  return (
-    <div className="mb-4">
-      <h2 className="text-lg font-bold">{title}</h2>
-      {body && <p className="mt-1 text-sm text-muted">{body}</p>}
-    </div>
-  );
-}
-
-function CatalogueEmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <div>
-      <SectionHeading title={title} body={CATALOGUE_NOTE} />
-      <EmptyState title={`No ${title.toLowerCase()} yet`} body={body} />
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------- Overview
 function OverviewTab({
@@ -760,6 +563,300 @@ function NotesTab({
     </div>
   );
 }
+
+
+// --------------------------------------------------- Catalogue tabs (live)
+function ServicesTab({
+  relationships,
+  relationshipsError,
+}: {
+  relationships: CompanyServiceRow[];
+  relationshipsError: string | null;
+}) {
+  return (
+    <div>
+      <SectionHeading
+        title="Services"
+        body="Service-to-company relationships with source, confidence, verification status and active-with-ScaleBridge tracking."
+      />
+      {relationshipsError && (
+        <div className="mb-4">
+          <ErrorText>{relationshipsError}</ErrorText>
+        </div>
+      )}
+      <Card className="overflow-x-auto">
+        {relationships.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              title="No services mapped"
+              body="Services discovered or entered for this company appear here."
+            />
+          </div>
+        ) : (
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Service</th>
+                <th className="px-3 py-3">Source</th>
+                <th className="px-3 py-3">Confidence</th>
+                <th className="px-3 py-3">Verification</th>
+                <th className="px-3 py-3">Active</th>
+                <th className="px-3 py-3">Upsell</th>
+                <th className="px-5 py-3">Admin decision</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {relationships.map((r) => (
+                <tr key={r.id} className="hover:bg-mist/60">
+                  <td className="px-5 py-3">
+                    <Link
+                      to="/admin/services/$serviceId"
+                      params={{ serviceId: r.serviceId }}
+                      className="font-semibold text-navy hover:text-brand"
+                    >
+                      {r.service.name}
+                    </Link>
+                    <div className="mt-0.5 flex items-center gap-2">
+                      <span className="text-xs text-muted">{r.service.categoryName}</span>
+                      <ServiceStatusBadge status={r.service.status} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{r.source}</td>
+                  <td className="px-3 py-3">
+                    <ConfidenceBadge confidence={r.confidence} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <VerificationBadge status={r.verificationStatus} />
+                  </td>
+                  <td className="px-3 py-3">
+                    {r.activeWithScalebridge ? (
+                      <Badge tone="green">Yes</Badge>
+                    ) : (
+                      <Badge tone="slate">No</Badge>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    {r.upsellRecommended ? (
+                      <Badge tone="teal">Yes</Badge>
+                    ) : (
+                      <Badge tone="slate">No</Badge>
+                    )}
+                  </td>
+                  <td className="px-5 py-3">
+                    <DecisionBadge decision={r.adminDecision} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function EvidenceTab({ relationships }: { relationships: CompanyServiceRow[] }) {
+  const rows = relationships.flatMap((r) =>
+    r.evidence.map((e) => ({ ...e, serviceName: r.service.name })),
+  );
+  return (
+    <div>
+      <SectionHeading
+        title="Service evidence"
+        body="Proof rows behind this company\'s relationships — service pages, capability statements, case studies and documents."
+      />
+      <Card>
+        {rows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              title="No evidence recorded"
+              body="Evidence captured for this company\'s services appears here."
+            />
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {rows.map((e) => (
+              <li key={e.id} className="px-5 py-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-ink">{e.title ?? "Untitled evidence"}</p>
+                  <Badge tone="slate">{e.evidenceType ?? "document"}</Badge>
+                </div>
+                <p className="mt-0.5 text-xs text-muted">
+                  {e.serviceName}
+                  {e.agentVersion ? ` · agent v${e.agentVersion}` : ""}
+                  {e.capturedAt ? ` · captured ${formatDateTime(e.capturedAt)}` : ""}
+                </p>
+                {e.sourceUrl && (
+                  <a
+                    href={e.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block max-w-full truncate text-xs font-semibold text-brand hover:underline"
+                  >
+                    {e.sourceUrl}
+                  </a>
+                )}
+                {e.excerpt && (
+                  <p className="mt-1.5 rounded-lg bg-mist px-3 py-2 text-xs text-ink">{e.excerpt}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function AiInsightsTab({
+  relationships,
+  adminCanMutate,
+  onRefresh,
+  onError,
+  onFlash,
+}: {
+  relationships: CompanyServiceRow[];
+  adminCanMutate: boolean;
+  onRefresh: () => void;
+  onError: (e: string) => void;
+  onFlash: (m: string) => void;
+}) {
+  const rows = relationships.filter((r) => r.source === "AI discovery");
+  return (
+    <DecisionList
+      title="AI insights"
+      body="AI Service Intelligence discoveries for this company — approve, reject or archive; every decision is audit-logged."
+      rows={rows}
+      adminCanMutate={adminCanMutate}
+      onRefresh={onRefresh}
+      onError={onError}
+      onFlash={onFlash}
+    />
+  );
+}
+
+function UpsellsTab({
+  relationships,
+  adminCanMutate,
+  onRefresh,
+  onError,
+  onFlash,
+}: {
+  relationships: CompanyServiceRow[];
+  adminCanMutate: boolean;
+  onRefresh: () => void;
+  onError: (e: string) => void;
+  onFlash: (m: string) => void;
+}) {
+  const rows = relationships.filter((r) => r.upsellRecommended);
+  return (
+    <DecisionList
+      title="Upsell opportunities"
+      body="Upsell and cross-sell recommendations for this company — human approval is required before anything is actioned."
+      rows={rows}
+      adminCanMutate={adminCanMutate}
+      onRefresh={onRefresh}
+      onError={onError}
+      onFlash={onFlash}
+    />
+  );
+}
+
+function DecisionList({
+  title,
+  body,
+  rows,
+  adminCanMutate,
+  onRefresh,
+  onError,
+  onFlash,
+}: {
+  title: string;
+  body: string;
+  rows: CompanyServiceRow[];
+  adminCanMutate: boolean;
+  onRefresh: () => void;
+  onError: (e: string) => void;
+  onFlash: (m: string) => void;
+}) {
+  return (
+    <div>
+      <SectionHeading title={title} body={body} />
+      <Card className="overflow-x-auto">
+        {rows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState title="Nothing here yet" body="Rows appear once the catalogue records discoveries or recommendations for this company." />
+          </div>
+        ) : (
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Service</th>
+                <th className="px-3 py-3">Confidence</th>
+                <th className="px-3 py-3">Evidence</th>
+                <th className="px-3 py-3">Decision</th>
+                <th className="px-5 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.id} className="align-top hover:bg-mist/60">
+                  <td className="px-5 py-3">
+                    <Link
+                      to="/admin/services/$serviceId"
+                      params={{ serviceId: r.serviceId }}
+                      className="font-semibold text-navy hover:text-brand"
+                    >
+                      {r.service.name}
+                    </Link>
+                    <div className="mt-0.5 flex items-center gap-2">
+                      <span className="text-xs text-muted">{r.service.categoryName}</span>
+                      <ServiceStatusBadge status={r.service.status} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <ConfidenceBadge confidence={r.confidence} />
+                  </td>
+                  <td className="max-w-xs px-3 py-3">
+                    {r.evidenceSummary ? (
+                      <p className="text-xs text-ink">{r.evidenceSummary}</p>
+                    ) : (
+                      <span className="text-xs text-muted">
+                        {r.evidence.length} evidence row{r.evidence.length === 1 ? "" : "s"} · no summary
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <DecisionBadge decision={r.adminDecision} />
+                  </td>
+                  <td className="px-5 py-3">
+                    {adminCanMutate ? (
+                      <DecisionButtons
+                        relationshipId={r.id}
+                        onDone={(ok, err) => {
+                          if (!ok) {
+                            onError(err ?? "Could not record the decision.");
+                            return;
+                          }
+                          onError("");
+                          onFlash("Decision recorded ✓");
+                          onRefresh();
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted">Read-only</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);

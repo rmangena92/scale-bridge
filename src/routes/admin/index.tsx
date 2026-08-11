@@ -38,7 +38,7 @@ function MasterDashboardPage() {
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Platform overview</h1>
         <p className="mt-2 max-w-xl text-sm text-muted">
           Live counts from the ScaleBridge database{stats ? "" : " — stats unavailable"}.
-          Services, opportunities and AI surfaces land with the services catalogue build.
+          Services, opportunities and AI surfaces reflect the live catalogue.
         </p>
       </div>
 
@@ -149,22 +149,22 @@ function StatGrid({ stats }: { stats: AdminDashboardStats }) {
       <StatCard
         label="Services listed"
         value={stats.servicesListed}
-        hint="available after services catalogue build"
+        hint="listed + pending review, excludes rejected/archived"
       />
       <StatCard
         label="Opportunities"
         value={stats.opportunitiesOpen}
-        hint="available after services catalogue build"
+        hint="open AI + upsell review items (a dual-lens row counts twice)"
       />
       <StatCard
         label="AI discoveries"
         value={stats.aiDiscoveries}
-        hint="available after services catalogue build"
+        hint="awaiting admin review"
       />
       <StatCard
         label="Upsell recommendations"
         value={stats.upsellRecommendations}
-        hint="available after services catalogue build"
+        hint="awaiting admin review"
       />
     </div>
   );
@@ -175,14 +175,14 @@ function CatalogueCard() {
     <Card className="p-6">
       <h2 className="text-lg font-bold">Services catalogue &amp; AI</h2>
       <p className="mt-2 text-sm text-muted">
-        The central services catalogue, AI Service Intelligence agent and upsell
-        workflow arrive in the next build steps. Until then the Services,
-        Opportunities, AI Insights and Upsell Opportunities sections show
-        honest empty states — no records are fabricated.
+        The catalogue is live — services, company relationships, evidence,
+        opportunities and upsell decisions are all managed in the portal. The AI
+        Service Intelligence agent, upsell workflow and agent controls land in
+        the next build steps.
       </p>
       <div className="mt-4 grid gap-2 text-xs text-muted sm:grid-cols-2">
         <div className="rounded-lg bg-mist px-3 py-2">
-          <span className="font-semibold text-navy">Services catalogue</span> — plan item 2
+          <span className="font-semibold text-navy">Services catalogue</span> — live
         </div>
         <div className="rounded-lg bg-mist px-3 py-2">
           <span className="font-semibold text-navy">AI Service Intelligence</span> — plan item 5
@@ -216,14 +216,14 @@ function RecentActivity({ stats }: { stats: AdminDashboardStats }) {
             <li key={a.id} className="flex items-center justify-between gap-3 py-2.5">
               <div className="min-w-0">
                 <p className="truncate font-mono text-xs font-semibold text-navy">
-                  {a.action}
+                  {a.action ?? "—"}
                 </p>
                 <p className="truncate text-xs text-muted">
                   {a.actorEmail ?? "system"}
                 </p>
               </div>
               <span className="shrink-0 text-xs text-muted">
-                {formatDate(a.createdAt)}
+                {a.createdAt ? formatDate(a.createdAt) : "—"}
               </span>
             </li>
           ))}

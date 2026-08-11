@@ -50,14 +50,18 @@ import {
   doAddServiceEvidence,
   doCreateOrUpdateCompanyService,
   doCreateService,
+  doCreateServiceCategory,
   doGetServiceDetail,
+  doListCatalogueOpportunities,
   doListCompanyServices,
   doListServiceCategories,
+  doListServiceEvidence,
   doListServices,
   doMergeServices,
   doSetCompanyServiceDecision,
   doSetServiceStatus,
   doUpdateService,
+  doUpdateServiceCategory,
 } from "./services";
 import type {
   AdminRole,
@@ -98,8 +102,10 @@ export type {
 } from "./admin-core";
 export type {
   CompanyServicesResult,
+  CatalogueOpportunitiesResult,
   ServiceCategoriesResult,
   ServiceDetailResult,
+  ServiceEvidenceListResult,
   ServicesResult,
 } from "./services";
 
@@ -363,5 +369,38 @@ export const setCompanyServiceDecision = createServerFn({ method: "POST" })
       adminDecision: data.adminDecision,
       reviewedBy: data.reviewedBy,
       notes: data.notes,
+    }),
+  );
+
+export const listCatalogueOpportunities = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { scope: "open" | "ai" | "upsell" })
+  .handler(({ data }) => doListCatalogueOpportunities(data));
+
+export const getServiceEvidence = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { serviceId: string })
+  .handler(({ data }) => doListServiceEvidence(data.serviceId));
+
+export const createServiceCategory = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { name: string; description?: string | null; sortOrder?: number },
+  )
+  .handler(({ data }) => doCreateServiceCategory(data));
+
+export const updateServiceCategory = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        categoryId: string;
+        name: string;
+        description?: string | null;
+        sortOrder?: number;
+      },
+  )
+  .handler(({ data }) =>
+    doUpdateServiceCategory(data.categoryId, {
+      name: data.name,
+      description: data.description,
+      sortOrder: data.sortOrder,
     }),
   );

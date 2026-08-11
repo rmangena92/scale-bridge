@@ -17,20 +17,13 @@
  *    admin.company_service.*) in the same transaction as the change.
  */
 import { asUser, dbConfigured, ensureSchema, isUniqueViolation } from "./db";
+import type { Tx, TxQuery } from "./db";
 import { auditQuery } from "./audit";
 import { loadAdminUser } from "./auth-core";
+import { SERVICE_STATUSES } from "./service-types";
 
 // ------------------------------------------------------------- catalogue enums
-export const SERVICE_STATUSES = [
-  "Listed",
-  "Pending Review",
-  "Verified",
-  "AI Suggested",
-  "Client Intake Suggested",
-  "Rejected",
-  "Archived",
-] as const;
-export type ServiceStatus = (typeof SERVICE_STATUSES)[number];
+export { SERVICE_STATUSES, type ServiceStatus } from "./service-types";
 
 export const SERVICE_SOURCES = [
   "company profile",
@@ -956,5 +949,368 @@ export async function doSetCompanyServiceDecision(
   } catch (err) {
     console.error("setCompanyServiceDecision failed:", err);
     return { ok: false, error: "Could not record the admin decision." };
+  }
+}
+
+// -------------------------------------------------- catalogue opportunities
+/** Cross-company opportunity/decision rows for the Master Admin Opportunity
+ *  surfaces. scope 'open' = AI-discovery + upsell rows still awaiting an admin
+ *  decision (the dashboard's opportunitiesOpen); 'ai' = all AI-discovery rows;
+ *  'upsell' = all upsell-recommended rows. */
+export type CatalogueOpportunityRow = {
+  id: string;
+  companyId: string;
+  companyName: string;
+  companyType: string | null;
+  serviceId: string;
+  serviceName: string;
+  serviceCategory: string;
+  source: ServiceSource;
+  confidence: ServiceConfidence;
+  verificationStatus: CompanyServiceVerification;
+  evidenceSummary: string | null;
+  discoveredAt: string | null;
+  activeWithScalebridge: boolean;
+  upsellRecommended: boolean;
+  adminDecision: AdminDecision | null;
+  notes: string | null;
+  createdAt: string;
+  evidenceCount: number;
+  evidence: ServiceEvidenceRow[];
+};
+
+export type CatalogueOpportunitiesResult =
+  | { ok: true; opportunities: CatalogueOpportunityRow[]; total: number }
+  | { ok: false; error: string; setupRequired?: boolean };
+
+export async function doListCatalogueOpportunities(input: {
+  scope: "open" | "ai" | "upsell";
+}): Promise<CatalogueOpportunitiesResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const scope = input.scope === "ai" || input.scope === "upsell" ? input.scope : "open";
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+
+    // Scope conditions are written literally per branch — postgres.js
+    // parameterises interpolated strings, so a SELECT list or WHERE fragment
+    // cannot come from a JS const.
+    const shapeRel = (r: unknown) => r as {
+      id: string;
+      company_id: string;
+      company_name: string;
+      company_type: string | null;
+      service_id: string;
+      service_name: string;
+      service_category: string;
+      source: ServiceSource;
+      confidence: ServiceConfidence;
+      verification_status: CompanyServiceVerification;
+      evidence_summary: string | null;
+      discovered_at: string | null;
+      active_with_scalebridge: boolean;
+      upsell_recommended: boolean;
+      admin_decision: AdminDecision | null;
+      notes: string | null;
+      created_at: string;
+      evidence_count: number;
+    }[];
+    const shapeEv = (r: unknown) => r as {
+      id: string;
+      company_service_id: string;
+      evidence_type: string | null;
+      title: string | null;
+      source_url: string | null;
+      excerpt: string | null;
+      captured_at: string | null;
+      agent_version: string | null;
+      created_at: string;
+    }[];
+
+    const run = (build: (tx: Tx) => TxQuery[]) =>
+      asUser(admin.user.id, admin.user.role, (tx) => build(tx));
+
+    let rows: unknown[];
+    if (scope === "ai") {
+      rows = await run((tx) => [
+        tx`select cs.id, cs.company_id, c.name as company_name, c.type as company_type,
+                  cs.service_id, s.name as service_name, sc.name as service_category,
+                  cs.source, cs.confidence, cs.verification_status,
+                  cs.evidence_summary, cs.discovered_at,
+                  cs.active_with_scalebridge, cs.upsell_recommended,
+                  cs.admin_decision, cs.notes, cs.created_at,
+                  (select count(*)::int from service_evidence se
+                    where se.company_service_id = cs.id) as evidence_count
+         from company_services cs
+         join companies c on c.id = cs.company_id
+         join services s on s.id = cs.service_id
+         join service_categories sc on sc.id = s.category_id
+         where cs.source = 'AI discovery'
+         order by cs.created_at desc`,
+        tx`select se.id, se.company_service_id, se.evidence_type, se.title,
+                  se.source_url, se.excerpt, se.captured_at, se.agent_version,
+                  se.created_at
+         from service_evidence se
+         where se.company_service_id in (
+           select cs2.id from company_services cs2 where cs2.source = 'AI discovery'
+         )
+         order by se.created_at desc`,
+      ]);
+    } else if (scope === "upsell") {
+      rows = await run((tx) => [
+        tx`select cs.id, cs.company_id, c.name as company_name, c.type as company_type,
+                  cs.service_id, s.name as service_name, sc.name as service_category,
+                  cs.source, cs.confidence, cs.verification_status,
+                  cs.evidence_summary, cs.discovered_at,
+                  cs.active_with_scalebridge, cs.upsell_recommended,
+                  cs.admin_decision, cs.notes, cs.created_at,
+                  (select count(*)::int from service_evidence se
+                    where se.company_service_id = cs.id) as evidence_count
+         from company_services cs
+         join companies c on c.id = cs.company_id
+         join services s on s.id = cs.service_id
+         join service_categories sc on sc.id = s.category_id
+         where cs.upsell_recommended = true
+         order by cs.created_at desc`,
+        tx`select se.id, se.company_service_id, se.evidence_type, se.title,
+                  se.source_url, se.excerpt, se.captured_at, se.agent_version,
+                  se.created_at
+         from service_evidence se
+         where se.company_service_id in (
+           select cs2.id from company_services cs2 where cs2.upsell_recommended = true
+         )
+         order by se.created_at desc`,
+      ]);
+    } else {
+      rows = await run((tx) => [
+        tx`select cs.id, cs.company_id, c.name as company_name, c.type as company_type,
+                  cs.service_id, s.name as service_name, sc.name as service_category,
+                  cs.source, cs.confidence, cs.verification_status,
+                  cs.evidence_summary, cs.discovered_at,
+                  cs.active_with_scalebridge, cs.upsell_recommended,
+                  cs.admin_decision, cs.notes, cs.created_at,
+                  (select count(*)::int from service_evidence se
+                    where se.company_service_id = cs.id) as evidence_count
+         from company_services cs
+         join companies c on c.id = cs.company_id
+         join services s on s.id = cs.service_id
+         join service_categories sc on sc.id = s.category_id
+         where (cs.source = 'AI discovery' or cs.upsell_recommended = true)
+           and cs.admin_decision is null
+         order by cs.created_at desc`,
+        tx`select se.id, se.company_service_id, se.evidence_type, se.title,
+                  se.source_url, se.excerpt, se.captured_at, se.agent_version,
+                  se.created_at
+         from service_evidence se
+         where se.company_service_id in (
+           select cs2.id from company_services cs2
+           where (cs2.source = 'AI discovery' or cs2.upsell_recommended = true)
+             and cs2.admin_decision is null
+         )
+         order by se.created_at desc`,
+      ]);
+    }
+
+    const relRows = shapeRel(rows[1]);
+    const evRows = shapeEv(rows[2]);
+
+    const evidenceByRel = new Map<string, ServiceEvidenceRow[]>();
+    for (const e of evRows) {
+      const list = evidenceByRel.get(e.company_service_id) ?? [];
+      list.push({
+        id: e.id,
+        companyServiceId: e.company_service_id,
+        evidenceType: e.evidence_type,
+        title: e.title,
+        sourceUrl: e.source_url,
+        excerpt: e.excerpt,
+        capturedAt: e.captured_at ? String(e.captured_at) : null,
+        agentVersion: e.agent_version,
+        createdAt: String(e.created_at),
+      });
+      evidenceByRel.set(e.company_service_id, list);
+    }
+
+    const opportunities: CatalogueOpportunityRow[] = relRows.map((r) => ({
+      id: r.id,
+      companyId: r.company_id,
+      companyName: r.company_name,
+      companyType: r.company_type,
+      serviceId: r.service_id,
+      serviceName: r.service_name,
+      serviceCategory: r.service_category,
+      source: r.source,
+      confidence: r.confidence,
+      verificationStatus: r.verification_status,
+      evidenceSummary: r.evidence_summary,
+      discoveredAt: r.discovered_at ? String(r.discovered_at) : null,
+      activeWithScalebridge: r.active_with_scalebridge,
+      upsellRecommended: r.upsell_recommended,
+      adminDecision: r.admin_decision,
+      notes: r.notes,
+      createdAt: String(r.created_at),
+      evidenceCount: Number(r.evidence_count ?? 0),
+      evidence: evidenceByRel.get(r.id) ?? [],
+    }));
+    return { ok: true, opportunities, total: opportunities.length };
+  } catch (err) {
+    console.error("listCatalogueOpportunities failed:", err);
+    return { ok: false, error: "Could not load catalogue opportunities." };
+  }
+}
+
+// ------------------------------------------------- service evidence (service-scoped)
+export type ServiceEvidenceListResult =
+  | {
+      ok: true;
+      evidence: {
+        id: string;
+        companyServiceId: string;
+        companyId: string;
+        companyName: string;
+        evidenceType: string | null;
+        title: string | null;
+        sourceUrl: string | null;
+        excerpt: string | null;
+        capturedAt: string | null;
+        agentVersion: string | null;
+        createdAt: string;
+      }[];
+      total: number;
+    }
+  | { ok: false; error: string; setupRequired?: boolean };
+
+/** Evidence rows across every company relationship of one service. */
+export async function doListServiceEvidence(serviceId: string): Promise<ServiceEvidenceListResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const rows = (await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select se.id, se.company_service_id, se.evidence_type, se.title,
+                se.source_url, se.excerpt, se.captured_at, se.agent_version,
+                se.created_at, cs.company_id, c.name as company_name
+         from service_evidence se
+         join company_services cs on cs.id = se.company_service_id
+         join companies c on c.id = cs.company_id
+         where cs.service_id = ${serviceId}
+         order by se.created_at desc`,
+    ]))[1] as {
+      id: string;
+      company_service_id: string;
+      evidence_type: string | null;
+      title: string | null;
+      source_url: string | null;
+      excerpt: string | null;
+      captured_at: string | null;
+      agent_version: string | null;
+      created_at: string;
+      company_id: string;
+      company_name: string;
+    }[];
+    const evidence = rows.map((r) => ({
+      id: r.id,
+      companyServiceId: r.company_service_id,
+      companyId: r.company_id,
+      companyName: r.company_name,
+      evidenceType: r.evidence_type,
+      title: r.title,
+      sourceUrl: r.source_url,
+      excerpt: r.excerpt,
+      capturedAt: r.captured_at ? String(r.captured_at) : null,
+      agentVersion: r.agent_version,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, evidence, total: evidence.length };
+  } catch (err) {
+    console.error("listServiceEvidence failed:", err);
+    return { ok: false, error: "Could not load evidence for the service." };
+  }
+}
+
+// -------------------------------------------------------------- categories
+export type ServiceCategoryInput = {
+  name: string;
+  description?: string | null;
+  sortOrder?: number;
+};
+
+export async function doCreateServiceCategory(input: ServiceCategoryInput): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const name = (input.name ?? "").trim().slice(0, 100);
+  if (!name) return { ok: false, error: "Category name is required." };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+    if (!admin.canMutate) return { ok: false, error: "FORBIDDEN_READ_ONLY" };
+
+    const slug = slugify(name);
+    const sortOrder = Number.isFinite(input.sortOrder) ? Math.trunc(Number(input.sortOrder)) : 0;
+    const rows = (await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`insert into service_categories (name, slug, description, sort_order)
+         values (${name}, ${slug},
+                 ${input.description?.trim().slice(0, 500) ?? null},
+                 ${sortOrder})
+         returning id`,
+      auditQuery(tx, admin.user.id, "admin.category.create", {
+        name,
+        slug,
+        sortOrder,
+      }),
+    ])) as unknown[];
+    return { ok: true, id: (rows[1] as { id: string }[])[0]?.id };
+  } catch (err) {
+    console.error("createServiceCategory failed:", err);
+    if (isUniqueViolation(err)) {
+      return { ok: false, error: "A category with this name already exists." };
+    }
+    return { ok: false, error: "Could not create the category." };
+  }
+}
+
+export async function doUpdateServiceCategory(
+  categoryId: string,
+  input: ServiceCategoryInput,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const name = (input.name ?? "").trim().slice(0, 100);
+  if (!name) return { ok: false, error: "Category name is required." };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+    if (!admin.canMutate) return { ok: false, error: "FORBIDDEN_READ_ONLY" };
+
+    const rows = (await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select id, name, slug, sort_order from service_categories where id = ${categoryId}`,
+    ]))[1] as { id: string; name: string; slug: string; sort_order: number }[];
+    if (!rows[0]) return { ok: false, error: "Category not found." };
+    const from = rows[0];
+    const slug = slugify(name);
+    const sortOrder = Number.isFinite(input.sortOrder) ? Math.trunc(Number(input.sortOrder)) : from.sort_order;
+
+    await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`update service_categories
+         set name = ${name}, slug = ${slug},
+             description = ${input.description?.trim().slice(0, 500) ?? null},
+             sort_order = ${sortOrder}
+         where id = ${categoryId}`,
+      auditQuery(tx, admin.user.id, "admin.category.update", {
+        categoryId,
+        from: { name: from.name, sortOrder: Number(from.sort_order) },
+        to: { name, sortOrder },
+      }),
+    ]);
+    return { ok: true, id: categoryId };
+  } catch (err) {
+    console.error("updateServiceCategory failed:", err);
+    if (isUniqueViolation(err)) {
+      return { ok: false, error: "A category with this name already exists." };
+    }
+    return { ok: false, error: "Could not update the category." };
   }
 }

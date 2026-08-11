@@ -721,3 +721,235 @@ export type AdminStaffMember = {
   name: string | null;
   roles: AdminRole[];
 };
+
+// -------------------------------------------------------------- client portal
+/** Client-side roles (client_org_members.role). */
+export const CLIENT_ROLES = [
+  "client_admin",
+  "client_pm",
+  "client_finance",
+  "client_reviewer",
+  "client_read_only",
+] as const;
+
+export type ClientRole = (typeof CLIENT_ROLES)[number];
+
+export const CLIENT_ROLE_LABELS: Record<ClientRole, string> = {
+  client_admin: "Client administrator",
+  client_pm: "Project manager",
+  client_finance: "Finance user",
+  client_reviewer: "Reviewer",
+  client_read_only: "Read-only",
+};
+
+export const CLIENT_ROLE_BADGE_TONES: Record<
+  ClientRole,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  client_admin: "navy",
+  client_pm: "blue",
+  client_finance: "teal",
+  client_reviewer: "amber",
+  client_read_only: "slate",
+};
+
+/** Client organisation lifecycle (client_organizations.status). */
+export const CLIENT_ORG_STATUSES = [
+  "draft",
+  "registered",
+  "under_review",
+  "verified",
+  "suspended",
+  "archived",
+] as const;
+
+export type ClientOrgStatus = (typeof CLIENT_ORG_STATUSES)[number];
+
+export const CLIENT_ORG_STATUS_LABELS: Record<ClientOrgStatus, string> = {
+  draft: "Draft",
+  registered: "Registered",
+  under_review: "Under Review",
+  verified: "Verified",
+  suspended: "Suspended",
+  archived: "Archived",
+};
+
+/** One organisation the signed-in user acts for in the Client Portal. */
+export type ClientOrgMembership = {
+  orgId: string;
+  orgName: string;
+  orgStatus: ClientOrgStatus;
+  role: ClientRole;
+};
+
+/** The session user as resolved for the Client Portal (may span orgs). */
+export type ClientSession = {
+  user: PublicUser; // role is the user's system profile role
+  orgs: ClientOrgMembership[];
+  primaryOrg: ClientOrgMembership;
+  canMutate: boolean; // true when any membership is not read_only
+  isClientAdmin: boolean; // true when any membership is client_admin
+};
+
+/** Client org profile (My Organisation). */
+export type ClientOrgProfile = {
+  id: string;
+  name: string;
+  registrationNumber: string | null;
+  registrationCountry: string | null;
+  taxId: string | null;
+  address: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  status: ClientOrgStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Row in the client dashboard stat bundle. */
+export type ClientDashboardStats = {
+  orgName: string;
+  activeContracts: number;
+  contractValue: number;
+  completionPct: number;
+  upcomingMilestones: {
+    id: string;
+    name: string;
+    dueDate: string | null;
+    status: string;
+    workspaceTitle: string | null;
+  }[];
+  pendingApprovals: number;
+  documentsAwaitingReview: number;
+  openIssues: number;
+  variationRequests: number;
+  invoicesAwaitingAction: number;
+  recentMessages: number; // 0 until messaging ships (Part C)
+  recentActivity: {
+    id: string;
+    action: string;
+    actorEmail: string | null;
+    details: AuditDetails | null;
+    createdAt: string;
+  }[];
+  contractEndDates: {
+    id: string;
+    title: string;
+    endDate: string | null;
+    status: WorkspaceStatus;
+  }[];
+};
+
+/** Row in the client contracts list. */
+export type ClientContractSummary = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: WorkspaceStatus;
+  industry: string | null;
+  location: string | null;
+  contractValue: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  completionPct: number;
+  leadName: string | null;
+  leadEmail: string | null;
+  leadCompany: string | null;
+  packageCount: number;
+  visiblePackageCount: number;
+};
+
+/** One client-visible work package (names/scope/status — no pricing). */
+export type ClientWorkPackage = {
+  id: string;
+  name: string;
+  description: string | null;
+  scopeNotes: string | null;
+  category: string | null;
+  status: WorkPackageStatus;
+  companyName: string | null;
+  milestoneCount: number;
+  completedMilestoneCount: number;
+  completionPct: number;
+};
+
+/** Full client view of one contract workspace. */
+export type ClientContractDetail = {
+  workspace: {
+    id: string;
+    title: string;
+    description: string | null;
+    status: WorkspaceStatus;
+    industry: string | null;
+    location: string | null;
+    contractValue: number | null;
+    startDate: string | null;
+    endDate: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  lead: {
+    userId: string;
+    name: string | null;
+    email: string;
+    companyName: string | null;
+  } | null;
+  clientOrg: {
+    orgId: string;
+    name: string;
+    contactEmail: string | null;
+  };
+  participants: {
+    companyId: string | null;
+    companyName: string | null;
+    participantRole: ParticipantRole | null;
+    status: InvitationStatus | null;
+  }[];
+  workPackages: ClientWorkPackage[];
+  milestones: {
+    id: string;
+    name: string;
+    dueDate: string | null;
+    status: string;
+    workPackageName: string | null;
+  }[];
+  issues: {
+    id: string;
+    title: string;
+    severity: string | null;
+    status: string;
+  }[];
+  invoices: {
+    id: string;
+    invoiceNumber: string;
+    title: string | null;
+    amount: number;
+    status: string;
+  }[];
+  documents: {
+    id: string;
+    name: string;
+    category: string | null;
+    reviewStatus: string;
+    uploadedAt: string;
+  }[];
+  audit: {
+    id: string;
+    action: string;
+    actorEmail: string | null;
+    details: AuditDetails | null;
+    createdAt: string;
+  }[];
+};
+
+/** Row in the client Team roster. */
+export type ClientTeamMember = {
+  userId: string;
+  email: string;
+  name: string | null;
+  role: ClientRole;
+  userStatus: UserStatus;
+  joinedAt: string;
+  isSelf: boolean;
+};
+

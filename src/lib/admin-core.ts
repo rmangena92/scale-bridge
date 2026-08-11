@@ -144,7 +144,7 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
          limit 20`,
     ]);
     // asUser() returns [set_config_rows, ...query_rows] — real results start at [1].
-    const n = (i: number) => Number((rows[i] as { n: number }[] | undefined)?.[0]?.n ?? 0);
+    const n = (i: number) => Number((rows[i + 1] as { n: number }[] | undefined)?.[0]?.n ?? 0); // asUser returns [set_config, ...queries]
     const payments = rows[10] as { total: string }[];
     const activity = rows[11] as {
       id: string;
@@ -320,6 +320,7 @@ export async function doGetUserDetail(userId: string): Promise<UserDetailResult>
       id: string;
       workspace_id: string;
       workspace_title: string | null;
+      work_package: string | null;
       email: string;
       company_name: string | null;
       participant_role: AdminUserDetail["invitations"][number]["participantRole"];
@@ -333,7 +334,6 @@ export async function doGetUserDetail(userId: string): Promise<UserDetailResult>
       last_used_at: string;
       expires_at: string;
     }[];
-    const roleRows = rows[5] as { role: AdminRole }[];
 
     return {
       ok: true,

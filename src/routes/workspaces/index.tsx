@@ -1,11 +1,11 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { AppShell } from "~/components/AppShell";
 import {
   Badge,
   Button,
-  ButtonLink,
+
   Card,
   DbSetupPage,
   EmptyState,
@@ -140,14 +140,13 @@ function WorkspaceRow({ workspace }: { workspace: PublicWorkspace }) {
             </p>
           )}
         </div>
-        <ButtonLink
+        <Link
           to="/workspaces/$workspaceId"
           params={{ workspaceId: workspace.id }}
-          variant="outline"
-          size="sm"
+          className="inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-navy transition-colors hover:border-brand hover:text-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
         >
           Open →
-        </ButtonLink>
+        </Link>
       </div>
       <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-slate-100 pt-4">
         <Stat label="Work packages" value={workspace.packageCount} />

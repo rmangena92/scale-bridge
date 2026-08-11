@@ -13,12 +13,27 @@ import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvitationsRouteImport } from './routes/invitations'
+import { Route as ClientRouteImport } from './routes/client'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces/index'
+import { Route as ClientIndexRouteImport } from './routes/client/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces/$workspaceId'
+import { Route as ClientVariationsRouteImport } from './routes/client/variations'
+import { Route as ClientTeamRouteImport } from './routes/client/team'
+import { Route as ClientSettingsRouteImport } from './routes/client/settings'
+import { Route as ClientReportsRouteImport } from './routes/client/reports'
+import { Route as ClientProjectsRouteImport } from './routes/client/projects'
+import { Route as ClientOrganisationRouteImport } from './routes/client/organisation'
+import { Route as ClientMilestonesRouteImport } from './routes/client/milestones'
+import { Route as ClientMessagesRouteImport } from './routes/client/messages'
+import { Route as ClientLoginRouteImport } from './routes/client/login'
+import { Route as ClientIssuesRouteImport } from './routes/client/issues'
+import { Route as ClientInvoicesRouteImport } from './routes/client/invoices'
+import { Route as ClientDocumentsRouteImport } from './routes/client/documents'
+import { Route as ClientApprovalsRouteImport } from './routes/client/approvals'
 import { Route as AdminVerificationRouteImport } from './routes/admin/verification'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSupportRouteImport } from './routes/admin/support'
@@ -34,12 +49,14 @@ import { Route as AdminDisputesRouteImport } from './routes/admin/disputes'
 import { Route as AdminContractsRouteImport } from './routes/admin/contracts'
 import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
 import { Route as AdminAuditLogRouteImport } from './routes/admin/audit-log'
+import { Route as ClientContractsIndexRouteImport } from './routes/client/contracts/index'
 import { Route as AdminVerificationIndexRouteImport } from './routes/admin/verification/index'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin/users/index'
 import { Route as AdminSupportIndexRouteImport } from './routes/admin/support/index'
 import { Route as AdminSettingsIndexRouteImport } from './routes/admin/settings/index'
 import { Route as AdminContractsIndexRouteImport } from './routes/admin/contracts/index'
 import { Route as AdminCompaniesIndexRouteImport } from './routes/admin/companies/index'
+import { Route as ClientContractsWorkspaceIdRouteImport } from './routes/client/contracts/$workspaceId'
 import { Route as AdminVerificationCompanyIdRouteImport } from './routes/admin/verification/$companyId'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin/users/$userId'
 import { Route as AdminSupportCaseIdRouteImport } from './routes/admin/support/$caseId'
@@ -67,6 +84,11 @@ const InvitationsRoute = InvitationsRouteImport.update({
   path: '/invitations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClientRoute = ClientRouteImport.update({
+  id: '/client',
+  path: '/client',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
@@ -87,6 +109,11 @@ const WorkspacesIndexRoute = WorkspacesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const ClientIndexRoute = ClientIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ClientRoute,
+} as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -96,6 +123,71 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   id: '/$workspaceId',
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
+} as any)
+const ClientVariationsRoute = ClientVariationsRouteImport.update({
+  id: '/variations',
+  path: '/variations',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientTeamRoute = ClientTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientSettingsRoute = ClientSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientReportsRoute = ClientReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientProjectsRoute = ClientProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientOrganisationRoute = ClientOrganisationRouteImport.update({
+  id: '/organisation',
+  path: '/organisation',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientMilestonesRoute = ClientMilestonesRouteImport.update({
+  id: '/milestones',
+  path: '/milestones',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientMessagesRoute = ClientMessagesRouteImport.update({
+  id: '/messages',
+  path: '/messages',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientLoginRoute = ClientLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientIssuesRoute = ClientIssuesRouteImport.update({
+  id: '/issues',
+  path: '/issues',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientInvoicesRoute = ClientInvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientDocumentsRoute = ClientDocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientApprovalsRoute = ClientApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
+  getParentRoute: () => ClientRoute,
 } as any)
 const AdminVerificationRoute = AdminVerificationRouteImport.update({
   id: '/verification',
@@ -172,6 +264,11 @@ const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
   path: '/audit-log',
   getParentRoute: () => AdminRoute,
 } as any)
+const ClientContractsIndexRoute = ClientContractsIndexRouteImport.update({
+  id: '/contracts/',
+  path: '/contracts/',
+  getParentRoute: () => ClientRoute,
+} as any)
 const AdminVerificationIndexRoute = AdminVerificationIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -202,6 +299,12 @@ const AdminCompaniesIndexRoute = AdminCompaniesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminCompaniesRoute,
 } as any)
+const ClientContractsWorkspaceIdRoute =
+  ClientContractsWorkspaceIdRouteImport.update({
+    id: '/contracts/$workspaceId',
+    path: '/contracts/$workspaceId',
+    getParentRoute: () => ClientRoute,
+  } as any)
 const AdminVerificationCompanyIdRoute =
   AdminVerificationCompanyIdRouteImport.update({
     id: '/$companyId',
@@ -239,6 +342,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
+  '/client': typeof ClientRouteWithChildren
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
@@ -258,8 +362,22 @@ export interface FileRoutesByFullPath {
   '/admin/support': typeof AdminSupportRouteWithChildren
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
+  '/client/approvals': typeof ClientApprovalsRoute
+  '/client/documents': typeof ClientDocumentsRoute
+  '/client/invoices': typeof ClientInvoicesRoute
+  '/client/issues': typeof ClientIssuesRoute
+  '/client/login': typeof ClientLoginRoute
+  '/client/messages': typeof ClientMessagesRoute
+  '/client/milestones': typeof ClientMilestonesRoute
+  '/client/organisation': typeof ClientOrganisationRoute
+  '/client/projects': typeof ClientProjectsRoute
+  '/client/reports': typeof ClientReportsRoute
+  '/client/settings': typeof ClientSettingsRoute
+  '/client/team': typeof ClientTeamRoute
+  '/client/variations': typeof ClientVariationsRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
@@ -267,12 +385,14 @@ export interface FileRoutesByFullPath {
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
+  '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
   '/admin/settings/': typeof AdminSettingsIndexRoute
   '/admin/support/': typeof AdminSupportIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
+  '/client/contracts/': typeof ClientContractsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -289,8 +409,22 @@ export interface FileRoutesByTo {
   '/admin/projects': typeof AdminProjectsRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
+  '/client/approvals': typeof ClientApprovalsRoute
+  '/client/documents': typeof ClientDocumentsRoute
+  '/client/invoices': typeof ClientInvoicesRoute
+  '/client/issues': typeof ClientIssuesRoute
+  '/client/login': typeof ClientLoginRoute
+  '/client/messages': typeof ClientMessagesRoute
+  '/client/milestones': typeof ClientMilestonesRoute
+  '/client/organisation': typeof ClientOrganisationRoute
+  '/client/projects': typeof ClientProjectsRoute
+  '/client/reports': typeof ClientReportsRoute
+  '/client/settings': typeof ClientSettingsRoute
+  '/client/team': typeof ClientTeamRoute
+  '/client/variations': typeof ClientVariationsRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/admin': typeof AdminIndexRoute
+  '/client': typeof ClientIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
   '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
@@ -298,18 +432,21 @@ export interface FileRoutesByTo {
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
+  '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies': typeof AdminCompaniesIndexRoute
   '/admin/contracts': typeof AdminContractsIndexRoute
   '/admin/settings': typeof AdminSettingsIndexRoute
   '/admin/support': typeof AdminSupportIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/admin/verification': typeof AdminVerificationIndexRoute
+  '/client/contracts': typeof ClientContractsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
+  '/client': typeof ClientRouteWithChildren
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
@@ -329,8 +466,22 @@ export interface FileRoutesById {
   '/admin/support': typeof AdminSupportRouteWithChildren
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
+  '/client/approvals': typeof ClientApprovalsRoute
+  '/client/documents': typeof ClientDocumentsRoute
+  '/client/invoices': typeof ClientInvoicesRoute
+  '/client/issues': typeof ClientIssuesRoute
+  '/client/login': typeof ClientLoginRoute
+  '/client/messages': typeof ClientMessagesRoute
+  '/client/milestones': typeof ClientMilestonesRoute
+  '/client/organisation': typeof ClientOrganisationRoute
+  '/client/projects': typeof ClientProjectsRoute
+  '/client/reports': typeof ClientReportsRoute
+  '/client/settings': typeof ClientSettingsRoute
+  '/client/team': typeof ClientTeamRoute
+  '/client/variations': typeof ClientVariationsRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
@@ -338,12 +489,14 @@ export interface FileRoutesById {
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
+  '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
   '/admin/settings/': typeof AdminSettingsIndexRoute
   '/admin/support/': typeof AdminSupportIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
+  '/client/contracts/': typeof ClientContractsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -351,6 +504,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/client'
     | '/invitations'
     | '/login'
     | '/signup'
@@ -370,8 +524,22 @@ export interface FileRouteTypes {
     | '/admin/support'
     | '/admin/users'
     | '/admin/verification'
+    | '/client/approvals'
+    | '/client/documents'
+    | '/client/invoices'
+    | '/client/issues'
+    | '/client/login'
+    | '/client/messages'
+    | '/client/milestones'
+    | '/client/organisation'
+    | '/client/projects'
+    | '/client/reports'
+    | '/client/settings'
+    | '/client/team'
+    | '/client/variations'
     | '/workspaces/$workspaceId'
     | '/admin/'
+    | '/client/'
     | '/workspaces/'
     | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
@@ -379,12 +547,14 @@ export interface FileRouteTypes {
     | '/admin/support/$caseId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
+    | '/client/contracts/$workspaceId'
     | '/admin/companies/'
     | '/admin/contracts/'
     | '/admin/settings/'
     | '/admin/support/'
     | '/admin/users/'
     | '/admin/verification/'
+    | '/client/contracts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -401,8 +571,22 @@ export interface FileRouteTypes {
     | '/admin/projects'
     | '/admin/reports'
     | '/admin/subscriptions'
+    | '/client/approvals'
+    | '/client/documents'
+    | '/client/invoices'
+    | '/client/issues'
+    | '/client/login'
+    | '/client/messages'
+    | '/client/milestones'
+    | '/client/organisation'
+    | '/client/projects'
+    | '/client/reports'
+    | '/client/settings'
+    | '/client/team'
+    | '/client/variations'
     | '/workspaces/$workspaceId'
     | '/admin'
+    | '/client'
     | '/workspaces'
     | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
@@ -410,17 +594,20 @@ export interface FileRouteTypes {
     | '/admin/support/$caseId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
+    | '/client/contracts/$workspaceId'
     | '/admin/companies'
     | '/admin/contracts'
     | '/admin/settings'
     | '/admin/support'
     | '/admin/users'
     | '/admin/verification'
+    | '/client/contracts'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/app'
+    | '/client'
     | '/invitations'
     | '/login'
     | '/signup'
@@ -440,8 +627,22 @@ export interface FileRouteTypes {
     | '/admin/support'
     | '/admin/users'
     | '/admin/verification'
+    | '/client/approvals'
+    | '/client/documents'
+    | '/client/invoices'
+    | '/client/issues'
+    | '/client/login'
+    | '/client/messages'
+    | '/client/milestones'
+    | '/client/organisation'
+    | '/client/projects'
+    | '/client/reports'
+    | '/client/settings'
+    | '/client/team'
+    | '/client/variations'
     | '/workspaces/$workspaceId'
     | '/admin/'
+    | '/client/'
     | '/workspaces/'
     | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
@@ -449,18 +650,21 @@ export interface FileRouteTypes {
     | '/admin/support/$caseId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
+    | '/client/contracts/$workspaceId'
     | '/admin/companies/'
     | '/admin/contracts/'
     | '/admin/settings/'
     | '/admin/support/'
     | '/admin/users/'
     | '/admin/verification/'
+    | '/client/contracts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRoute
+  ClientRoute: typeof ClientRouteWithChildren
   InvitationsRoute: typeof InvitationsRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
@@ -497,6 +701,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvitationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/client': {
+      id: '/client'
+      path: '/client'
+      fullPath: '/client'
+      preLoaderRoute: typeof ClientRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -525,6 +736,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesIndexRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/client/': {
+      id: '/client/'
+      path: '/'
+      fullPath: '/client/'
+      preLoaderRoute: typeof ClientIndexRouteImport
+      parentRoute: typeof ClientRoute
+    }
     '/admin/': {
       id: '/admin/'
       path: '/'
@@ -538,6 +756,97 @@ declare module '@tanstack/react-router' {
       fullPath: '/workspaces/$workspaceId'
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
+    }
+    '/client/variations': {
+      id: '/client/variations'
+      path: '/variations'
+      fullPath: '/client/variations'
+      preLoaderRoute: typeof ClientVariationsRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/team': {
+      id: '/client/team'
+      path: '/team'
+      fullPath: '/client/team'
+      preLoaderRoute: typeof ClientTeamRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/settings': {
+      id: '/client/settings'
+      path: '/settings'
+      fullPath: '/client/settings'
+      preLoaderRoute: typeof ClientSettingsRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/reports': {
+      id: '/client/reports'
+      path: '/reports'
+      fullPath: '/client/reports'
+      preLoaderRoute: typeof ClientReportsRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/projects': {
+      id: '/client/projects'
+      path: '/projects'
+      fullPath: '/client/projects'
+      preLoaderRoute: typeof ClientProjectsRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/organisation': {
+      id: '/client/organisation'
+      path: '/organisation'
+      fullPath: '/client/organisation'
+      preLoaderRoute: typeof ClientOrganisationRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/milestones': {
+      id: '/client/milestones'
+      path: '/milestones'
+      fullPath: '/client/milestones'
+      preLoaderRoute: typeof ClientMilestonesRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/messages': {
+      id: '/client/messages'
+      path: '/messages'
+      fullPath: '/client/messages'
+      preLoaderRoute: typeof ClientMessagesRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/login': {
+      id: '/client/login'
+      path: '/login'
+      fullPath: '/client/login'
+      preLoaderRoute: typeof ClientLoginRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/issues': {
+      id: '/client/issues'
+      path: '/issues'
+      fullPath: '/client/issues'
+      preLoaderRoute: typeof ClientIssuesRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/invoices': {
+      id: '/client/invoices'
+      path: '/invoices'
+      fullPath: '/client/invoices'
+      preLoaderRoute: typeof ClientInvoicesRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/documents': {
+      id: '/client/documents'
+      path: '/documents'
+      fullPath: '/client/documents'
+      preLoaderRoute: typeof ClientDocumentsRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/approvals': {
+      id: '/client/approvals'
+      path: '/approvals'
+      fullPath: '/client/approvals'
+      preLoaderRoute: typeof ClientApprovalsRouteImport
+      parentRoute: typeof ClientRoute
     }
     '/admin/verification': {
       id: '/admin/verification'
@@ -644,6 +953,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAuditLogRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/client/contracts/': {
+      id: '/client/contracts/'
+      path: '/contracts'
+      fullPath: '/client/contracts/'
+      preLoaderRoute: typeof ClientContractsIndexRouteImport
+      parentRoute: typeof ClientRoute
+    }
     '/admin/verification/': {
       id: '/admin/verification/'
       path: '/'
@@ -685,6 +1001,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/companies/'
       preLoaderRoute: typeof AdminCompaniesIndexRouteImport
       parentRoute: typeof AdminCompaniesRoute
+    }
+    '/client/contracts/$workspaceId': {
+      id: '/client/contracts/$workspaceId'
+      path: '/contracts/$workspaceId'
+      fullPath: '/client/contracts/$workspaceId'
+      preLoaderRoute: typeof ClientContractsWorkspaceIdRouteImport
+      parentRoute: typeof ClientRoute
     }
     '/admin/verification/$companyId': {
       id: '/admin/verification/$companyId'
@@ -854,6 +1177,47 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface ClientRouteChildren {
+  ClientApprovalsRoute: typeof ClientApprovalsRoute
+  ClientDocumentsRoute: typeof ClientDocumentsRoute
+  ClientInvoicesRoute: typeof ClientInvoicesRoute
+  ClientIssuesRoute: typeof ClientIssuesRoute
+  ClientLoginRoute: typeof ClientLoginRoute
+  ClientMessagesRoute: typeof ClientMessagesRoute
+  ClientMilestonesRoute: typeof ClientMilestonesRoute
+  ClientOrganisationRoute: typeof ClientOrganisationRoute
+  ClientProjectsRoute: typeof ClientProjectsRoute
+  ClientReportsRoute: typeof ClientReportsRoute
+  ClientSettingsRoute: typeof ClientSettingsRoute
+  ClientTeamRoute: typeof ClientTeamRoute
+  ClientVariationsRoute: typeof ClientVariationsRoute
+  ClientIndexRoute: typeof ClientIndexRoute
+  ClientContractsWorkspaceIdRoute: typeof ClientContractsWorkspaceIdRoute
+  ClientContractsIndexRoute: typeof ClientContractsIndexRoute
+}
+
+const ClientRouteChildren: ClientRouteChildren = {
+  ClientApprovalsRoute: ClientApprovalsRoute,
+  ClientDocumentsRoute: ClientDocumentsRoute,
+  ClientInvoicesRoute: ClientInvoicesRoute,
+  ClientIssuesRoute: ClientIssuesRoute,
+  ClientLoginRoute: ClientLoginRoute,
+  ClientMessagesRoute: ClientMessagesRoute,
+  ClientMilestonesRoute: ClientMilestonesRoute,
+  ClientOrganisationRoute: ClientOrganisationRoute,
+  ClientProjectsRoute: ClientProjectsRoute,
+  ClientReportsRoute: ClientReportsRoute,
+  ClientSettingsRoute: ClientSettingsRoute,
+  ClientTeamRoute: ClientTeamRoute,
+  ClientVariationsRoute: ClientVariationsRoute,
+  ClientIndexRoute: ClientIndexRoute,
+  ClientContractsWorkspaceIdRoute: ClientContractsWorkspaceIdRoute,
+  ClientContractsIndexRoute: ClientContractsIndexRoute,
+}
+
+const ClientRouteWithChildren =
+  ClientRoute._addFileChildren(ClientRouteChildren)
+
 interface WorkspacesRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
   WorkspacesIndexRoute: typeof WorkspacesIndexRoute
@@ -872,6 +1236,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRoute,
+  ClientRoute: ClientRouteWithChildren,
   InvitationsRoute: InvitationsRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,

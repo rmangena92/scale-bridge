@@ -32,6 +32,18 @@ export const ROLES_CHECK = "('sb_admin','lead_contractor','company_user','buyer'
 const UID = "nullif(current_setting('app.user_id', true), '')::uuid";
 const ROLE = "nullif(current_setting('app.role', true), '')";
 const IS_ADMIN = `${ROLE} = 'sb_admin'`;
+/**
+ * Any client-portal role. Client server functions scope every request with the
+ * acting user's CLIENT role (client_admin / client_pm / client_finance /
+ * client_reviewer / client_read_only) in app.role — the server derives it from
+ * the user's client_org_members row before calling asUser(), mirroring how
+ * sb_admin is asserted from admin_roles. Policies below use IS_CLIENT /
+ * ROLE='client_admin' as the RLS gate for client-visible data and
+ * client-admin-only mutations (an org-scoped roster check would be a
+ * self-referential subquery on client_org_members, which RLS rejects as
+ * infinite recursion; the server always re-verifies membership + role).
+ */
+const IS_CLIENT = `${ROLE} in ('client_admin','client_pm','client_finance','client_reviewer','client_read_only')`;
 
 /** Caller is a member of <t>.client_org_id (optionally limited to roles). */
 const clientMember = (t: string, roles?: string) =>
@@ -164,6 +176,16 @@ export const SCHEMA_SQL: string[] = [
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
   )`,
+  // Client Portal additions (idempotent): work-package visibility for the
+  // buying org + the responsible company. client_visible=true packages are
+  // shown to members of the linked client org; company_id is the participating
+  // company responsible for the package (names only — never pricing/margins).
+  `alter table work_packages add column if not exists client_visible boolean not null default true`,
+  `alter table work_packages add column if not exists company_id uuid references companies(id) on delete set null`,
+  // Client Portal addition (idempotent): contract term dates for the client
+  // contract overview / dashboard end-date list.
+  `alter table contract_workspaces add column if not exists start_date date`,
+  `alter table contract_workspaces add column if not exists end_date date`,
 
   // Per-user notification inbox. Rows are written by server functions on
   // invitation/accept/decline/verify events (the insert policy allows the
@@ -244,6 +266,11 @@ export const SCHEMA_SQL: string[] = [
     created_at timestamptz not null default now(),
     primary key (org_id, user_id)
   )`,
+  // Client Portal addition (idempotent): client-org scoping on the audit trail
+  // so client members see activity for their org's contracts (server sets it on
+  // client-scoped audit rows; workspace-scoped rows keep workspace_id). Placed
+  // after client_organizations so the FK can be created.
+  `alter table audit_logs add column if not exists client_org_id uuid references client_organizations(id) on delete set null`,
 
   // Links a contract workspace to the buying organisation. lead_contractor_id
   // is denormalized (same rationale as invitations.lead_contractor_id) so the
@@ -461,6 +488,10 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists invitations_company_id_idx on invitations (company_id)`,
   `create index if not exists invitations_email_idx on invitations (lower(email))`,
   `create index if not exists work_packages_workspace_id_idx on work_packages (workspace_id)`,
+  `create index if not exists work_packages_client_visible_idx on work_packages (workspace_id, client_visible)`,
+  `create index if not exists work_packages_company_id_idx on work_packages (company_id)`,
+  `create index if not exists contract_workspaces_term_idx on contract_workspaces (end_date)`,
+  `create index if not exists audit_logs_client_org_idx on audit_logs (client_org_id)`,
   `create index if not exists notifications_user_id_idx on notifications (user_id, created_at desc)`,
   `create index if not exists audit_logs_workspace_id_idx on audit_logs (workspace_id)`,
   `create index if not exists audit_logs_actor_id_idx on audit_logs (actor_id)`,
@@ -562,6 +593,9 @@ export const SCHEMA_SQL: string[] = [
   `create policy profiles_insert on profiles for insert with check (
     user_id = nullif(current_setting('app.user_id', true), '')::uuid
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    -- Client Portal: a client_admin creating a profile for a team member they
+    -- are inviting (role asserted server-side from client_org_members).
+    or nullif(current_setting('app.role', true), '') = 'client_admin'
   )`,
   `drop policy if exists profiles_update on profiles`,
   `create policy profiles_update on profiles for update using (
@@ -575,6 +609,27 @@ export const SCHEMA_SQL: string[] = [
   `create policy profiles_delete on profiles for delete using (
     user_id = nullif(current_setting('app.user_id', true), '')::uuid
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  // Client Portal: members of a client org may see the profile (name) of their
+  // own org's members and of the lead contractor of a contract linked to their
+  // org (key contacts on the contract overview). Acyclic: profiles →
+  // client_org_members (self-only) → contract_clients.
+  `drop policy if exists profiles_client_select on profiles`,
+  `create policy profiles_client_select on profiles for select using (
+    exists (
+      select 1 from client_org_members m
+      where m.user_id = ${UID}
+        and (
+          exists (
+            select 1 from client_org_members m2
+            where m2.org_id = m.org_id and m2.user_id = profiles.user_id
+          )
+          or exists (
+            select 1 from contract_clients cc
+            where cc.client_org_id = m.org_id and cc.lead_contractor_id = profiles.user_id
+          )
+        )
+    )
   )`,
 
   // --- companies: owner manages; admins manage all; verified companies are
@@ -603,6 +658,30 @@ export const SCHEMA_SQL: string[] = [
     owner_id = nullif(current_setting('app.user_id', true), '')::uuid
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
+  // Client Portal: a client-org member may see (names only — the server never
+  // selects internal_notes / commercial columns for client views) the
+  // companies responsible for their org's contracts: companies that own a
+  // client-visible work package in a contract linked to their org, and the
+  // lead contractor company of such a contract. Acyclic: companies →
+  // work_packages → contract_clients → client_org_members (self-only).
+  `drop policy if exists companies_client_select on companies`,
+  `create policy companies_client_select on companies for select using (
+    exists (
+      select 1 from work_packages wp
+      where wp.company_id = companies.id
+        and wp.client_visible = true
+        and exists (
+          select 1 from contract_clients cc
+          join client_org_members m on m.org_id = cc.client_org_id
+          where cc.contract_workspaces_id = wp.workspace_id and m.user_id = ${UID}
+        )
+    )
+    or exists (
+      select 1 from contract_clients cc2
+      join client_org_members m2 on m2.org_id = cc2.client_org_id
+      where cc2.lead_contractor_id = companies.owner_id and m2.user_id = ${UID}
+    )
+  )`,
 
   // --- contract_workspaces: the lead owns their workspaces; participants
   // (anyone with an open or joined invitation for their email) can see the
@@ -619,6 +698,15 @@ export const SCHEMA_SQL: string[] = [
           select lower(u.email) from users u
           where u.id = nullif(current_setting('app.user_id', true), '')::uuid
         )
+    )
+    -- Client Portal: members of a client org linked to this workspace
+    -- (contract_clients) may read the contract. Acyclic: contract_workspaces →
+    -- contract_clients → client_org_members (self-only).
+    or exists (
+      select 1 from contract_clients cc
+      join client_org_members m on m.org_id = cc.client_org_id
+      where cc.contract_workspaces_id = contract_workspaces.id
+        and m.user_id = nullif(current_setting('app.user_id', true), '')::uuid
     )
   )`,
   `drop policy if exists contract_workspaces_insert on contract_workspaces`,
@@ -756,6 +844,20 @@ export const SCHEMA_SQL: string[] = [
         and cw.lead_contractor_id = nullif(current_setting('app.user_id', true), '')::uuid
     )
   )`,
+  // Client Portal: members of a client org linked to the package's workspace
+  // may read packages marked client_visible (never pricing/margins — the
+  // server selects names/scope/status only). Acyclic: work_packages →
+  // contract_clients → client_org_members (self-only).
+  `drop policy if exists work_packages_client_select on work_packages`,
+  `create policy work_packages_client_select on work_packages for select using (
+    work_packages.client_visible = true
+    and exists (
+      select 1 from contract_clients cc
+      join client_org_members m on m.org_id = cc.client_org_id
+      where cc.contract_workspaces_id = work_packages.workspace_id
+        and m.user_id = ${UID}
+    )
+  )`,
 
   // --- notifications: an inbox per user. Only the owner (or an admin) reads
   // them. Inserts come from trusted server functions: a user can notify
@@ -825,6 +927,13 @@ export const SCHEMA_SQL: string[] = [
       )
     )
     or audit_logs.actor_id = nullif(current_setting('app.user_id', true), '')::uuid
+    -- Client Portal: members of the client org on the audit row may read the
+    -- activity for their org's contracts (client_org_id set by server on
+    -- client-scoped audit rows). Acyclic: audit_logs → client_org_members.
+    or (
+      audit_logs.client_org_id is not null
+      and ${clientMember("audit_logs")}
+    )
   )`,
 
   // ------------------------------------------------------------------
@@ -865,36 +974,51 @@ export const SCHEMA_SQL: string[] = [
   `drop policy if exists client_organizations_insert on client_organizations`,
   `create policy client_organizations_insert on client_organizations for insert with check (${IS_ADMIN})`,
   `drop policy if exists client_organizations_update on client_organizations`,
-  `create policy client_organizations_update on client_organizations for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `create policy client_organizations_update on client_organizations for update using (
+    ${IS_ADMIN}
+    -- Client Portal: a client_admin may update their org profile. The role is
+    -- asserted server-side from client_org_members before asUser(); the
+    -- org-scoping WHERE clause is applied by the server function.
+    or ${ROLE} = 'client_admin'
+  ) with check (
+    ${IS_ADMIN}
+    or ${ROLE} = 'client_admin'
+  )`,
   `drop policy if exists client_organizations_delete on client_organizations`,
   `create policy client_organizations_delete on client_organizations for delete using (${IS_ADMIN})`,
 
-  // --- client_org_members: users see their own membership; sb_admin manages
-  // all; the lead contractor of a contract that links this org may also add /
-  // update / remove members (the client-onboarding path) via the denormalized
-  // contract_clients.lead_contractor_id. A self-referential roster check would
-  // recurse, so "manage the team" is scoped to the lead/admin until a dedicated
-  // grant table is introduced with the Team UI.
+  // --- client_org_members: users see their own membership; any client-role
+  // scoped request (app.role = the acting user's client role, asserted
+  // server-side from their own membership) may read the roster so the Team UI
+  // can list the org (the server scopes WHERE org_id); sb_admin manages all;
+  // client_admin manages the roster (Team UI); the lead contractor of a
+  // contract that links this org may also add / update / remove members via the
+  // denormalized contract_clients.lead_contractor_id. A self-referential
+  // roster check would recurse, so client-admin grants key off app.role.
   `drop policy if exists client_org_members_select on client_org_members`,
   `create policy client_org_members_select on client_org_members for select using (
-    ${IS_ADMIN} or client_org_members.user_id = ${UID}
+    ${IS_ADMIN} or client_org_members.user_id = ${UID} or ${IS_CLIENT}
   )`,
   `drop policy if exists client_org_members_insert on client_org_members`,
   `create policy client_org_members_insert on client_org_members for insert with check (
     ${IS_ADMIN}
+    or ${ROLE} = 'client_admin'
     or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
   )`,
   `drop policy if exists client_org_members_update on client_org_members`,
   `create policy client_org_members_update on client_org_members for update using (
     ${IS_ADMIN}
+    or ${ROLE} = 'client_admin'
     or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
   ) with check (
     ${IS_ADMIN}
+    or ${ROLE} = 'client_admin'
     or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
   )`,
   `drop policy if exists client_org_members_delete on client_org_members`,
   `create policy client_org_members_delete on client_org_members for delete using (
     ${IS_ADMIN}
+    or ${ROLE} = 'client_admin'
     or exists (select 1 from contract_clients cc where cc.client_org_id = client_org_members.org_id and cc.lead_contractor_id = ${UID})
   )`,
 

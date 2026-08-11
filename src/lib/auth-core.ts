@@ -30,7 +30,15 @@ import {
 } from "./db";
 import { auditQuery } from "./audit";
 import { DEFAULT_ROLE } from "./types";
-import type { AdminRole, AdminSession, PublicUser, Role } from "./types";
+import type {
+  AdminRole,
+  AdminSession,
+  ClientOrgMembership,
+  ClientRole,
+  ClientSession,
+  PublicUser,
+  Role,
+} from "./types";
 
 export const SESSION_COOKIE = "sb_session";
 const SESSION_TTL_SECS = 60 * 60 * 24 * 30; // 30 days
@@ -173,6 +181,58 @@ export async function loadAdminUser(): Promise<AdminSession | null> {
     user: { ...sessionUser, role: "sb_admin" },
     staffRoles,
     canMutate: staffRoles.some((r) => r !== "read_only"),
+  };
+}
+
+// -------------------------------------------------------------- client auth
+/**
+ * Resolve the session user as a Client Portal user.
+ *
+ * Reads the user's client_org_members rows (org ids, names, statuses and
+ * client roles) and returns a ClientSession with `orgs` (every org the user
+ * acts for), `primaryOrg` (the first — a user may belong to several orgs; the
+ * portal shell offers an org switcher and every query is scoped to the
+ * selected org), and role flags. Returns null when there is no session or the
+ * user has no client_org_members row — the caller must treat null as "not a
+ * client user" and deny (guard redirects to /client/login).
+ *
+ * The membership read itself runs under the user's *profile* role via the
+ * client_org_members.user_id = app.user_id policy clause (which does not
+ * require a client role), so this helper works before any client-role scope.
+ */
+export async function loadClientUser(): Promise<ClientSession | null> {
+  if (!dbConfigured()) return null;
+  const sessionUser = await loadSessionUser();
+  if (!sessionUser) return null;
+
+  const rows = (await asUser(sessionUser.id, sessionUser.role, (tx) => [
+    tx`select m.org_id as org_id, m.role as role,
+              o.name as org_name, o.status as org_status
+       from client_org_members m
+       join client_organizations o on o.id = m.org_id
+       where m.user_id = ${sessionUser.id}
+       order by o.name, m.role`,
+  ]))[1] as {
+    org_id: string;
+    role: ClientRole;
+    org_name: string;
+    org_status: ClientSession["primaryOrg"]["orgStatus"];
+  }[];
+  if (rows.length === 0) return null;
+
+  const orgs: ClientOrgMembership[] = rows.map((r) => ({
+    orgId: r.org_id,
+    orgName: r.org_name,
+    orgStatus: r.org_status,
+    role: r.role,
+  }));
+
+  return {
+    user: sessionUser,
+    orgs,
+    primaryOrg: orgs[0],
+    canMutate: orgs.some((o) => o.role !== "client_read_only"),
+    isClientAdmin: orgs.some((o) => o.role === "client_admin"),
   };
 }
 

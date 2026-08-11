@@ -1091,7 +1091,7 @@ export async function doVerifyParticipant(
                        ${`/workspaces/${workspaceId}`})`,
           ]
         : []),
-      auditQuery(tx, user.id, "invitation.verify", { workspaceId, invitationId, email: inv.email }),
+      auditQuery(tx, user.id, "invitation.verify", { workspaceId, invitationId, email: inv.email }, workspaceId),
     ]);
     return { ok: true };
   } catch (err) {
@@ -1179,7 +1179,7 @@ export async function doReviewVerificationDocument(
         decision,
         note: cleanNote || null,
         previousStatus: doc.status,
-      }),
+      }, workspaceId),
     ]);
     return { ok: true };
   } catch (err) {

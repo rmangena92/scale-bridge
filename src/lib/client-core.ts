@@ -25,14 +25,27 @@ import { asService, asUser, dbConfigured, ensureSchema } from "./db";
 import { auditQuery } from "./audit";
 import { loadClientUser } from "./auth-core";
 import type {
+  ClientApprovals,
   ClientContractDetail,
   ClientContractSummary,
   ClientDashboardStats,
+  ClientDocument,
+  ClientDocumentCategory,
+  ClientDocumentReviewDecision,
+  ClientInvoice,
+  ClientInvoiceDecision,
+  ClientIssue,
+  ClientIssueSeverity,
+  ClientMilestone,
+  ClientMilestoneReviewDecision,
   ClientOrgMembership,
   ClientOrgProfile,
+  ClientProgressReport,
   ClientRole,
   ClientSession,
   ClientTeamMember,
+  ClientVariation,
+  ClientVariationDecision,
   Role,
 } from "./types";
 import { CLIENT_ROLES, ROLES } from "./types";
@@ -800,3 +813,1124 @@ export async function doUpdateClientProfile(
 export const CLIENT_SYSTEM_ROLES: Role[] = ROLES.filter(
   (r) => r === "buyer" || r === "project_user",
 );
+
+// ================================================================== Part B
+// Client/Buyer Portal Part B: contract documents, milestones, progress
+// reports, issues, variations, invoices + the approvals hub.
+//
+// SECURITY: every entry point re-verifies the org membership server-side
+// (membershipFor), and every mutation additionally verifies the workspace is
+// actually linked to the acting org (assertClientWorkspace) before touching a
+// row. Updates are always scoped by id AND workspace_id AND client_org_id, and
+// RLS (the Part A client policies on these tables) is the final gate. Client
+// role gates mirror the RLS update policies: client_admin/client_reviewer for
+// documents, client_admin/client_pm/client_reviewer for milestones,
+// client_admin/client_pm for issues + variations, client_finance/client_admin
+// for invoices.
+//
+// The client-facing status enums are a projection of the DB statuses: legacy
+// lead-portal values are mapped to the client vocabulary so every row the
+// client can see has one of the typed statuses below.
+
+// ------------------------------------------------------- status projections
+function mapDocumentStatus(s: string): ClientDocument["status"] {
+  return s as ClientDocument["status"];
+}
+
+function mapMilestoneStatus(s: string): ClientMilestone["status"] {
+  switch (s) {
+    case "upcoming":
+    case "in_progress":
+    case "delayed":
+      return "in_progress";
+    case "submitted_for_review":
+    case "submitted":
+      return "submitted";
+    case "rejected":
+    case "requires_clarification":
+    case "needs_changes":
+      return "needs_changes";
+    default:
+      return s as ClientMilestone["status"]; // planned / approved / completed
+  }
+}
+
+function mapIssueStatus(s: string): ClientIssue["status"] {
+  switch (s) {
+    case "under_review":
+    case "action_required":
+    case "waiting_client":
+    case "waiting_contractor":
+      return "under_review";
+    case "responded":
+      return "responded";
+    case "resolved":
+    case "closed":
+      return "closed";
+    default:
+      return s as ClientIssue["status"]; // open
+  }
+}
+
+function mapVariationStatus(s: string): ClientVariation["status"] {
+  switch (s) {
+    case "submitted":
+    case "under_client_review":
+    case "under_review":
+      return "under_review";
+    case "clarification_requested":
+    case "clarification_needed":
+      return "clarification_needed";
+    case "approved_with_conditions":
+    case "conditions":
+      return "conditions";
+    case "implemented":
+      return "approved";
+    default:
+      return s as ClientVariation["status"]; // proposed / approved / rejected
+  }
+}
+
+function mapInvoiceStatus(s: string): ClientInvoice["status"] {
+  switch (s) {
+    case "under_review":
+    case "overdue":
+      return "under_review";
+    case "correction_required":
+    case "corrections_requested":
+      return "corrections_requested";
+    case "scheduled_for_payment":
+    case "paid":
+      return "paid";
+    default:
+      return s as ClientInvoice["status"]; // submitted / approved / rejected
+  }
+}
+
+// ------------------------------------------------------------ access helper
+/**
+ * Verify (server-side, inside RLS as the acting user) that `workspaceId` is
+ * linked to `orgId` via contract_clients. Returns the workspace's lead
+ * contractor id (needed to denormalize lead_contractor_id on inserts) or null
+ * when the link does not exist. Mutations call this BEFORE their UPDATE/INSERT
+ * so a client-supplied workspaceId can never be trusted on its own.
+ */
+async function assertClientWorkspace(
+  userId: string,
+  role: string,
+  orgId: string,
+  workspaceId: string,
+): Promise<{ leadContractorId: string } | null> {
+  const rows = (await asUser(userId, role, (tx) => [
+    tx`select cc.lead_contractor_id
+       from contract_clients cc
+       where cc.contract_workspaces_id = ${workspaceId} and cc.client_org_id = ${orgId}`,
+  ]))[1] as { lead_contractor_id: string }[];
+  return rows[0] ? { leadContractorId: rows[0].lead_contractor_id } : null;
+}
+
+// -------------------------------------------------------------- documents
+export async function doListClientDocuments(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientDocument[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select d.id, d.workspace_id, cw.title as workspace_title, d.name as title,
+                d.file_name, d.category, d.status, d.uploaded_by,
+                u.email as uploaded_by_email, d.shared_at, d.created_at, d.updated_at
+         from documents d
+         join contract_workspaces cw on cw.id = d.workspace_id
+         left join users u on u.id = d.uploaded_by
+         where d.client_org_id = ${orgId} and d.visibility = 'client_visible'
+           ${workspaceId ? tx`and d.workspace_id = ${workspaceId}` : tx``}
+         order by d.shared_at desc nulls last, d.created_at desc
+         limit 100`,
+    ]))[1] as unknown[];
+
+    const docs: ClientDocument[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      title: string;
+      file_name: string | null;
+      category: ClientDocumentCategory | null;
+      status: string;
+      uploaded_by: string | null;
+      uploaded_by_email: string | null;
+      shared_at: string | Date | null;
+      created_at: string | Date;
+      updated_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      title: r.title,
+      fileName: r.file_name,
+      category: r.category,
+      status: mapDocumentStatus(r.status),
+      uploadedByUserId: r.uploaded_by,
+      uploadedByEmail: r.uploaded_by_email,
+      sharedAt: r.shared_at ? String(r.shared_at) : null,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    }));
+    return { ok: true, data: docs };
+  } catch (e) {
+    console.error("listClientDocuments failed:", e);
+    return err("Could not load the contract documents.");
+  }
+}
+
+export async function doReviewClientDocument(input: {
+  orgId: string;
+  workspaceId: string;
+  documentId: string;
+  decision: ClientDocumentReviewDecision;
+  comment?: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  if (input.decision !== "approved" && input.decision !== "needs_changes") {
+    return err("Invalid review decision.");
+  }
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    if (membership.role !== "client_admin" && membership.role !== "client_reviewer") {
+      return err("FORBIDDEN_READ_ONLY");
+    }
+    if (!(await assertClientWorkspace(client.user.id, membership.role, input.orgId, input.workspaceId))) {
+      return err("FORBIDDEN");
+    }
+
+    const comment = input.comment?.trim().slice(0, 1000) || null;
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`update documents
+         set status = ${input.decision}, reviewed_by = ${client.user.id},
+             review_comment = ${comment}, reviewed_at = now(), updated_at = now()
+         where id = ${input.documentId}
+           and workspace_id = ${input.workspaceId}
+           and client_org_id = ${input.orgId}`,
+      auditQuery(tx, client.user.id, "client.document.review", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        documentId: input.documentId,
+        decision: input.decision,
+        comment,
+      }, input.workspaceId, input.orgId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) return err("Document not found.");
+    return { ok: true };
+  } catch (e) {
+    console.error("reviewClientDocument failed:", e);
+    return err("Could not save the document review.");
+  }
+}
+
+// -------------------------------------------------------------- milestones
+export async function doListClientMilestones(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientMilestone[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select m.id, m.workspace_id, cw.title as workspace_title, m.work_package_id,
+                wp.name as work_package_name, m.name as title, m.description, m.due_date,
+                m.status, m.submitted_at, m.reviewed_at, m.reviewed_by,
+                ru.email as reviewed_by_email, m.created_at
+         from milestones m
+         join contract_workspaces cw on cw.id = m.workspace_id
+         left join work_packages wp on wp.id = m.work_package_id
+         left join users ru on ru.id = m.reviewed_by
+         where m.client_org_id = ${orgId}
+           ${workspaceId ? tx`and m.workspace_id = ${workspaceId}` : tx``}
+         order by m.due_date asc nulls last, m.created_at desc
+         limit 200`,
+    ]))[1] as unknown[];
+
+    const milestones: ClientMilestone[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      work_package_id: string | null;
+      work_package_name: string | null;
+      title: string;
+      description: string | null;
+      due_date: string | Date | null;
+      status: string;
+      submitted_at: string | Date | null;
+      reviewed_at: string | Date | null;
+      reviewed_by: string | null;
+      reviewed_by_email: string | null;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      title: r.title,
+      description: r.description,
+      dueDate: r.due_date ? String(r.due_date) : null,
+      status: mapMilestoneStatus(r.status),
+      submittedAt: r.submitted_at ? String(r.submitted_at) : null,
+      reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+      reviewedByUserId: r.reviewed_by,
+      reviewedByEmail: r.reviewed_by_email,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, data: milestones };
+  } catch (e) {
+    console.error("listClientMilestones failed:", e);
+    return err("Could not load the milestones.");
+  }
+}
+
+export async function doReviewClientMilestone(input: {
+  orgId: string;
+  workspaceId: string;
+  milestoneId: string;
+  decision: ClientMilestoneReviewDecision;
+  comment?: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  if (input.decision !== "approved" && input.decision !== "needs_changes") {
+    return err("Invalid review decision.");
+  }
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    if (
+      membership.role !== "client_admin" &&
+      membership.role !== "client_pm" &&
+      membership.role !== "client_reviewer"
+    ) {
+      return err("FORBIDDEN_READ_ONLY");
+    }
+    if (!(await assertClientWorkspace(client.user.id, membership.role, input.orgId, input.workspaceId))) {
+      return err("FORBIDDEN");
+    }
+
+    const comment = input.comment?.trim().slice(0, 1000) || null;
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`update milestones
+         set status = ${input.decision}, reviewed_at = now(), reviewed_by = ${client.user.id},
+             updated_at = now()
+         where id = ${input.milestoneId}
+           and workspace_id = ${input.workspaceId}
+           and client_org_id = ${input.orgId}`,
+      auditQuery(tx, client.user.id, "client.milestone.review", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        milestoneId: input.milestoneId,
+        decision: input.decision,
+        comment,
+      }, input.workspaceId, input.orgId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) return err("Milestone not found.");
+    return { ok: true };
+  } catch (e) {
+    console.error("reviewClientMilestone failed:", e);
+    return err("Could not save the milestone review.");
+  }
+}
+
+// ---------------------------------------------------------- progress reports
+export async function doListClientProgressReports(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientProgressReport[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select r.id, r.workspace_id, cw.title as workspace_title, r.milestone_id,
+                m.name as milestone_title, r.title, r.period_start, r.period_end,
+                r.body, r.submitted_by, u.email as submitted_by_email, r.created_at
+         from progress_reports r
+         join contract_workspaces cw on cw.id = r.workspace_id
+         left join milestones m on m.id = r.milestone_id
+         left join users u on u.id = r.submitted_by
+         where r.client_org_id = ${orgId}
+           ${workspaceId ? tx`and r.workspace_id = ${workspaceId}` : tx``}
+         order by r.period_end desc nulls last, r.created_at desc
+         limit 100`,
+    ]))[1] as unknown[];
+
+    const reports: ClientProgressReport[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      milestone_id: string | null;
+      milestone_title: string | null;
+      title: string | null;
+      period_start: string | Date | null;
+      period_end: string | Date | null;
+      body: string | null;
+      submitted_by: string | null;
+      submitted_by_email: string | null;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      milestoneId: r.milestone_id,
+      milestoneTitle: r.milestone_title,
+      title: r.title,
+      periodStart: r.period_start ? String(r.period_start) : null,
+      periodEnd: r.period_end ? String(r.period_end) : null,
+      body: r.body,
+      submittedByUserId: r.submitted_by,
+      submittedByEmail: r.submitted_by_email,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, data: reports };
+  } catch (e) {
+    console.error("listClientProgressReports failed:", e);
+    return err("Could not load the progress reports.");
+  }
+}
+
+export async function doGetClientProgressReport(input: {
+  orgId: string;
+  workspaceId: string;
+  reportId: string;
+}): Promise<ClientResult<ClientProgressReport>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select r.id, r.workspace_id, cw.title as workspace_title, r.milestone_id,
+                m.name as milestone_title, r.title, r.period_start, r.period_end,
+                r.body, r.submitted_by, u.email as submitted_by_email, r.created_at
+         from progress_reports r
+         join contract_workspaces cw on cw.id = r.workspace_id
+         left join milestones m on m.id = r.milestone_id
+         left join users u on u.id = r.submitted_by
+         where r.client_org_id = ${input.orgId}
+           and r.workspace_id = ${input.workspaceId}
+           and r.id = ${input.reportId}`,
+    ]))[1] as unknown[];
+    const r = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      milestone_id: string | null;
+      milestone_title: string | null;
+      title: string | null;
+      period_start: string | Date | null;
+      period_end: string | Date | null;
+      body: string | null;
+      submitted_by: string | null;
+      submitted_by_email: string | null;
+      created_at: string | Date;
+    }[])[0];
+    if (!r) return err("Progress report not found.");
+    return {
+      ok: true,
+      data: {
+        id: r.id,
+        workspaceId: r.workspace_id,
+        workspaceTitle: r.workspace_title,
+        milestoneId: r.milestone_id,
+        milestoneTitle: r.milestone_title,
+        title: r.title,
+        periodStart: r.period_start ? String(r.period_start) : null,
+        periodEnd: r.period_end ? String(r.period_end) : null,
+        body: r.body,
+        submittedByUserId: r.submitted_by,
+        submittedByEmail: r.submitted_by_email,
+        createdAt: String(r.created_at),
+      },
+    };
+  } catch (e) {
+    console.error("getClientProgressReport failed:", e);
+    return err("Could not load the progress report.");
+  }
+}
+
+// ------------------------------------------------------------------- issues
+export async function doListClientIssues(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientIssue[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select i.id, i.workspace_id, cw.title as workspace_title, i.work_package_id,
+                wp.name as work_package_name, i.title, i.description, i.severity, i.status,
+                i.response, i.responded_at, i.responded_by,
+                ru.email as responded_by_email, i.raised_by,
+                rby.email as raised_by_email, i.created_at
+         from issues i
+         join contract_workspaces cw on cw.id = i.workspace_id
+         left join work_packages wp on wp.id = i.work_package_id
+         left join users ru on ru.id = i.responded_by
+         left join users rby on rby.id = i.raised_by
+         where i.client_org_id = ${orgId}
+           ${workspaceId ? tx`and i.workspace_id = ${workspaceId}` : tx``}
+         order by i.created_at desc
+         limit 200`,
+    ]))[1] as unknown[];
+
+    const issues: ClientIssue[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      work_package_id: string | null;
+      work_package_name: string | null;
+      title: string;
+      description: string | null;
+      severity: ClientIssueSeverity | null;
+      status: string;
+      response: string | null;
+      responded_at: string | Date | null;
+      responded_by: string | null;
+      responded_by_email: string | null;
+      raised_by: string | null;
+      raised_by_email: string | null;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      title: r.title,
+      description: r.description,
+      severity: r.severity,
+      status: mapIssueStatus(r.status),
+      response: r.response,
+      respondedAt: r.responded_at ? String(r.responded_at) : null,
+      respondedByUserId: r.responded_by,
+      respondedByEmail: r.responded_by_email,
+      raisedByUserId: r.raised_by,
+      raisedByEmail: r.raised_by_email,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, data: issues };
+  } catch (e) {
+    console.error("listClientIssues failed:", e);
+    return err("Could not load the issues.");
+  }
+}
+
+export async function doRaiseClientIssue(input: {
+  orgId: string;
+  workspaceId: string;
+  workPackageId?: string | null;
+  title: string;
+  description: string;
+  severity: ClientIssueSeverity;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  const title = input.title.trim().slice(0, 200);
+  const description = input.description.trim().slice(0, 4000);
+  if (!title) return err("Enter a title for the issue.");
+  if (!description) return err("Describe the issue.");
+  if (input.severity !== "low" && input.severity !== "medium" && input.severity !== "high") {
+    return err("Invalid severity.");
+  }
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    if (membership.role !== "client_admin" && membership.role !== "client_pm") {
+      return err("FORBIDDEN_READ_ONLY");
+    }
+    const link = await assertClientWorkspace(client.user.id, membership.role, input.orgId, input.workspaceId);
+    if (!link) return err("FORBIDDEN");
+
+    await asUser(client.user.id, membership.role, (tx) => [
+      tx`insert into issues (workspace_id, work_package_id, lead_contractor_id, client_org_id,
+                            title, description, severity, status, raised_by, created_at)
+         values (${input.workspaceId}, ${input.workPackageId ?? null}, ${link.leadContractorId},
+                 ${input.orgId}, ${title}, ${description}, ${input.severity}, 'open',
+                 ${client.user.id}, now())`,
+      auditQuery(tx, client.user.id, "client.issue.raise", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        workPackageId: input.workPackageId ?? null,
+        title,
+        severity: input.severity,
+      }, input.workspaceId, input.orgId),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    console.error("raiseClientIssue failed:", e);
+    return err("Could not raise the issue.");
+  }
+}
+
+// --------------------------------------------------------------- variations
+export async function doListClientVariations(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientVariation[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select v.id, v.workspace_id, cw.title as workspace_title, v.work_package_id,
+                wp.name as work_package_name, v.title, v.description, v.reason,
+                v.proposed_amount_cents, v.status, v.conditions, v.decided_at,
+                v.decided_by, du.email as decided_by_email, v.created_at
+         from variations v
+         join contract_workspaces cw on cw.id = v.workspace_id
+         left join work_packages wp on wp.id = v.work_package_id
+         left join users du on du.id = v.decided_by
+         where v.client_org_id = ${orgId} and v.status <> 'draft'
+           ${workspaceId ? tx`and v.workspace_id = ${workspaceId}` : tx``}
+         order by v.created_at desc
+         limit 200`,
+    ]))[1] as unknown[];
+
+    const variations: ClientVariation[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      work_package_id: string | null;
+      work_package_name: string | null;
+      title: string;
+      description: string | null;
+      reason: string | null;
+      proposed_amount_cents: string | number | null;
+      status: string;
+      conditions: string | null;
+      decided_at: string | Date | null;
+      decided_by: string | null;
+      decided_by_email: string | null;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      title: r.title,
+      description: r.description,
+      reason: r.reason,
+      proposedAmountCents: r.proposed_amount_cents != null ? Number(r.proposed_amount_cents) : null,
+      status: mapVariationStatus(r.status),
+      conditions: r.conditions,
+      decidedAt: r.decided_at ? String(r.decided_at) : null,
+      decidedByUserId: r.decided_by,
+      decidedByEmail: r.decided_by_email,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, data: variations };
+  } catch (e) {
+    console.error("listClientVariations failed:", e);
+    return err("Could not load the variations.");
+  }
+}
+
+export async function doReviewClientVariation(input: {
+  orgId: string;
+  workspaceId: string;
+  variationId: string;
+  decision: ClientVariationDecision;
+  conditions?: string;
+  reason?: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  const decisions: ClientVariationDecision[] = [
+    "approved", "rejected", "clarification_needed", "conditions",
+  ];
+  if (!decisions.includes(input.decision)) return err("Invalid decision.");
+  if (input.decision === "conditions" && !input.conditions?.trim()) {
+    return err("Enter the conditions for approval.");
+  }
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    if (membership.role !== "client_admin" && membership.role !== "client_pm") {
+      return err("FORBIDDEN_READ_ONLY");
+    }
+    if (!(await assertClientWorkspace(client.user.id, membership.role, input.orgId, input.workspaceId))) {
+      return err("FORBIDDEN");
+    }
+
+    const conditions =
+      input.decision === "conditions" ? input.conditions!.trim().slice(0, 2000) : null;
+    const reason = input.reason?.trim().slice(0, 1000) || null;
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`update variations
+         set status = ${input.decision}, conditions = ${conditions},
+             decided_at = now(), decided_by = ${client.user.id}, updated_at = now()
+         where id = ${input.variationId}
+           and workspace_id = ${input.workspaceId}
+           and client_org_id = ${input.orgId}`,
+      auditQuery(tx, client.user.id, "client.variation.review", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        variationId: input.variationId,
+        decision: input.decision,
+        conditions,
+        reason,
+      }, input.workspaceId, input.orgId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) return err("Variation not found.");
+    return { ok: true };
+  } catch (e) {
+    console.error("reviewClientVariation failed:", e);
+    return err("Could not save the variation decision.");
+  }
+}
+
+// ----------------------------------------------------------------- invoices
+export async function doListClientInvoices(
+  orgId: string,
+  workspaceId?: string,
+): Promise<ClientResult<ClientInvoice[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select i.id, i.workspace_id, cw.title as workspace_title, i.work_package_id,
+                wp.name as work_package_name, i.invoice_number, i.title,
+                coalesce(i.amount_cents, (i.amount * 100)::bigint) as amount_cents,
+                i.currency, i.status, i.due_date, i.paid_at, i.review_notes,
+                i.reviewed_at, i.reviewed_by, rv.email as reviewed_by_email,
+                i.supplier_company_id, sc.name as supplier_company_name, i.created_at
+         from invoices i
+         join contract_workspaces cw on cw.id = i.workspace_id
+         left join work_packages wp on wp.id = i.work_package_id
+         left join users rv on rv.id = i.reviewed_by
+         left join companies sc on sc.id = i.supplier_company_id
+         where i.client_org_id = ${orgId} and i.status not in ('draft','cancelled')
+           ${workspaceId ? tx`and i.workspace_id = ${workspaceId}` : tx``}
+         order by i.created_at desc
+         limit 200`,
+    ]))[1] as unknown[];
+
+    const invoices: ClientInvoice[] = (rows as {
+      id: string;
+      workspace_id: string;
+      workspace_title: string | null;
+      work_package_id: string | null;
+      work_package_name: string | null;
+      invoice_number: string;
+      title: string | null;
+      amount_cents: string | number | null;
+      currency: string;
+      status: string;
+      due_date: string | Date | null;
+      paid_at: string | Date | null;
+      review_notes: string | null;
+      reviewed_at: string | Date | null;
+      reviewed_by: string | null;
+      reviewed_by_email: string | null;
+      supplier_company_id: string | null;
+      supplier_company_name: string | null;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      workPackageId: r.work_package_id,
+      workPackageName: r.work_package_name,
+      invoiceNumber: r.invoice_number,
+      title: r.title,
+      amountCents: r.amount_cents != null ? Number(r.amount_cents) : 0,
+      currency: r.currency,
+      status: mapInvoiceStatus(r.status),
+      dueDate: r.due_date ? String(r.due_date) : null,
+      paidAt: r.paid_at ? String(r.paid_at) : null,
+      reviewNotes: r.review_notes,
+      reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+      reviewedByUserId: r.reviewed_by,
+      reviewedByEmail: r.reviewed_by_email,
+      supplierCompanyId: r.supplier_company_id,
+      supplierCompanyName: r.supplier_company_name,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, data: invoices };
+  } catch (e) {
+    console.error("listClientInvoices failed:", e);
+    return err("Could not load the invoices.");
+  }
+}
+
+export async function doReviewClientInvoice(input: {
+  orgId: string;
+  workspaceId: string;
+  invoiceId: string;
+  decision: ClientInvoiceDecision;
+  reviewNotes?: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  const decisions: ClientInvoiceDecision[] = ["approved", "rejected", "corrections_requested"];
+  if (!decisions.includes(input.decision)) return err("Invalid decision.");
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    // Invoice decisions are a finance responsibility (client_admin overrides).
+    if (membership.role !== "client_finance" && membership.role !== "client_admin") {
+      return err("Only finance users can review invoices.");
+    }
+    if (!(await assertClientWorkspace(client.user.id, membership.role, input.orgId, input.workspaceId))) {
+      return err("FORBIDDEN");
+    }
+
+    const reviewNotes = input.reviewNotes?.trim().slice(0, 2000) || null;
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`update invoices
+         set status = ${input.decision}, review_notes = ${reviewNotes},
+             reviewed_at = now(), reviewed_by = ${client.user.id}, updated_at = now()
+         where id = ${input.invoiceId}
+           and workspace_id = ${input.workspaceId}
+           and client_org_id = ${input.orgId}`,
+      auditQuery(tx, client.user.id, "client.invoice.review", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        invoiceId: input.invoiceId,
+        decision: input.decision,
+        reviewNotes,
+      }, input.workspaceId, input.orgId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) return err("Invoice not found.");
+    return { ok: true };
+  } catch (e) {
+    console.error("reviewClientInvoice failed:", e);
+    return err("Could not save the invoice review.");
+  }
+}
+
+// ------------------------------------------------------- approvals hub
+export async function doGetClientApprovals(orgId: string): Promise<ClientResult<ClientApprovals>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`select count(*)::int as n from variations v
+         where v.client_org_id = ${orgId} and v.status in ('submitted','under_client_review','under_review')`,
+      tx`select count(*)::int as n from invoices i
+         where i.client_org_id = ${orgId} and i.status = 'under_review'`,
+      tx`select count(*)::int as n from milestones m
+         where m.client_org_id = ${orgId} and m.status in ('submitted','submitted_for_review')`,
+      tx`select count(*)::int as n from documents d
+         where d.client_org_id = ${orgId} and d.visibility = 'client_visible' and d.status = 'under_review'`,
+      tx`select count(*)::int as n from issues i
+         where i.client_org_id = ${orgId} and i.status = 'open'`,
+      tx`select v.id, v.workspace_id, cw.title as workspace_title, v.work_package_id,
+                wp.name as work_package_name, v.title, v.description, v.reason,
+                v.proposed_amount_cents, v.status, v.conditions, v.decided_at,
+                v.decided_by, du.email as decided_by_email, v.created_at
+         from variations v
+         join contract_workspaces cw on cw.id = v.workspace_id
+         left join work_packages wp on wp.id = v.work_package_id
+         left join users du on du.id = v.decided_by
+         where v.client_org_id = ${orgId} and v.status in ('submitted','under_client_review','under_review')
+         order by v.created_at desc limit 20`,
+      tx`select i.id, i.workspace_id, cw.title as workspace_title, i.work_package_id,
+                wp.name as work_package_name, i.invoice_number, i.title,
+                coalesce(i.amount_cents, (i.amount * 100)::bigint) as amount_cents,
+                i.currency, i.status, i.due_date, i.paid_at, i.review_notes,
+                i.reviewed_at, i.reviewed_by, rv.email as reviewed_by_email,
+                i.supplier_company_id, sc.name as supplier_company_name, i.created_at
+         from invoices i
+         join contract_workspaces cw on cw.id = i.workspace_id
+         left join work_packages wp on wp.id = i.work_package_id
+         left join users rv on rv.id = i.reviewed_by
+         left join companies sc on sc.id = i.supplier_company_id
+         where i.client_org_id = ${orgId} and i.status = 'under_review'
+         order by i.created_at desc limit 20`,
+      tx`select m.id, m.workspace_id, cw.title as workspace_title, m.work_package_id,
+                wp.name as work_package_name, m.name as title, m.description, m.due_date,
+                m.status, m.submitted_at, m.reviewed_at, m.reviewed_by,
+                ru.email as reviewed_by_email, m.created_at
+         from milestones m
+         join contract_workspaces cw on cw.id = m.workspace_id
+         left join work_packages wp on wp.id = m.work_package_id
+         left join users ru on ru.id = m.reviewed_by
+         where m.client_org_id = ${orgId} and m.status in ('submitted','submitted_for_review')
+         order by m.created_at desc limit 20`,
+      tx`select d.id, d.workspace_id, cw.title as workspace_title, d.name as title,
+                d.file_name, d.category, d.status, d.uploaded_by,
+                u.email as uploaded_by_email, d.shared_at, d.created_at, d.updated_at
+         from documents d
+         join contract_workspaces cw on cw.id = d.workspace_id
+         left join users u on u.id = d.uploaded_by
+         where d.client_org_id = ${orgId} and d.visibility = 'client_visible' and d.status = 'under_review'
+         order by d.shared_at desc nulls last, d.created_at desc limit 20`,
+      tx`select i.id, i.workspace_id, cw.title as workspace_title, i.work_package_id,
+                wp.name as work_package_name, i.title, i.description, i.severity, i.status,
+                i.response, i.responded_at, i.responded_by,
+                ru.email as responded_by_email, i.raised_by,
+                rby.email as raised_by_email, i.created_at
+         from issues i
+         join contract_workspaces cw on cw.id = i.workspace_id
+         left join work_packages wp on wp.id = i.work_package_id
+         left join users ru on ru.id = i.responded_by
+         left join users rby on rby.id = i.raised_by
+         where i.client_org_id = ${orgId} and i.status = 'open'
+         order by i.created_at desc limit 20`,
+    ]);
+
+    const n = (i: number) => Number((rows[i + 1] as { n: number }[])[0]?.n ?? 0);
+
+    return {
+      ok: true,
+      data: {
+        counts: {
+          variations: n(0),
+          invoices: n(1),
+          milestones: n(2),
+          documents: n(3),
+          issues: n(4),
+        },
+        variations: (rows[6] as Parameters<typeof mapVariationRow>[0][]).map(mapVariationRow),
+        invoices: (rows[7] as Parameters<typeof mapInvoiceRow>[0][]).map(mapInvoiceRow),
+        milestones: (rows[8] as Parameters<typeof mapMilestoneRow>[0][]).map(mapMilestoneRow),
+        documents: (rows[9] as Parameters<typeof mapDocumentRow>[0][]).map(mapDocumentRow),
+        issues: (rows[10] as Parameters<typeof mapIssueRow>[0][]).map(mapIssueRow),
+      },
+    };
+  } catch (e) {
+    console.error("getClientApprovals failed:", e);
+    return err("Could not load your approvals.");
+  }
+}
+
+// ------------------------------------------------ shared row mappers (Part B)
+function mapDocumentRow(r: {
+  id: string;
+  workspace_id: string;
+  workspace_title: string | null;
+  title: string;
+  file_name: string | null;
+  category: ClientDocumentCategory | null;
+  status: string;
+  uploaded_by: string | null;
+  uploaded_by_email: string | null;
+  shared_at: string | Date | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}): ClientDocument {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workspaceTitle: r.workspace_title,
+    title: r.title,
+    fileName: r.file_name,
+    category: r.category,
+    status: mapDocumentStatus(r.status),
+    uploadedByUserId: r.uploaded_by,
+    uploadedByEmail: r.uploaded_by_email,
+    sharedAt: r.shared_at ? String(r.shared_at) : null,
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapMilestoneRow(r: {
+  id: string;
+  workspace_id: string;
+  workspace_title: string | null;
+  work_package_id: string | null;
+  work_package_name: string | null;
+  title: string;
+  description: string | null;
+  due_date: string | Date | null;
+  status: string;
+  submitted_at: string | Date | null;
+  reviewed_at: string | Date | null;
+  reviewed_by: string | null;
+  reviewed_by_email: string | null;
+  created_at: string | Date;
+}): ClientMilestone {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workspaceTitle: r.workspace_title,
+    workPackageId: r.work_package_id,
+    workPackageName: r.work_package_name,
+    title: r.title,
+    description: r.description,
+    dueDate: r.due_date ? String(r.due_date) : null,
+    status: mapMilestoneStatus(r.status),
+    submittedAt: r.submitted_at ? String(r.submitted_at) : null,
+    reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+    reviewedByUserId: r.reviewed_by,
+    reviewedByEmail: r.reviewed_by_email,
+    createdAt: String(r.created_at),
+  };
+}
+
+function mapIssueRow(r: {
+  id: string;
+  workspace_id: string;
+  workspace_title: string | null;
+  work_package_id: string | null;
+  work_package_name: string | null;
+  title: string;
+  description: string | null;
+  severity: ClientIssueSeverity | null;
+  status: string;
+  response: string | null;
+  responded_at: string | Date | null;
+  responded_by: string | null;
+  responded_by_email: string | null;
+  raised_by: string | null;
+  raised_by_email: string | null;
+  created_at: string | Date;
+}): ClientIssue {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workspaceTitle: r.workspace_title,
+    workPackageId: r.work_package_id,
+    workPackageName: r.work_package_name,
+    title: r.title,
+    description: r.description,
+    severity: r.severity,
+    status: mapIssueStatus(r.status),
+    response: r.response,
+    respondedAt: r.responded_at ? String(r.responded_at) : null,
+    respondedByUserId: r.responded_by,
+    respondedByEmail: r.responded_by_email,
+    raisedByUserId: r.raised_by,
+    raisedByEmail: r.raised_by_email,
+    createdAt: String(r.created_at),
+  };
+}
+
+function mapVariationRow(r: {
+  id: string;
+  workspace_id: string;
+  workspace_title: string | null;
+  work_package_id: string | null;
+  work_package_name: string | null;
+  title: string;
+  description: string | null;
+  reason: string | null;
+  proposed_amount_cents: string | number | null;
+  status: string;
+  conditions: string | null;
+  decided_at: string | Date | null;
+  decided_by: string | null;
+  decided_by_email: string | null;
+  created_at: string | Date;
+}): ClientVariation {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workspaceTitle: r.workspace_title,
+    workPackageId: r.work_package_id,
+    workPackageName: r.work_package_name,
+    title: r.title,
+    description: r.description,
+    reason: r.reason,
+    proposedAmountCents: r.proposed_amount_cents != null ? Number(r.proposed_amount_cents) : null,
+    status: mapVariationStatus(r.status),
+    conditions: r.conditions,
+    decidedAt: r.decided_at ? String(r.decided_at) : null,
+    decidedByUserId: r.decided_by,
+    decidedByEmail: r.decided_by_email,
+    createdAt: String(r.created_at),
+  };
+}
+
+function mapInvoiceRow(r: {
+  id: string;
+  workspace_id: string;
+  workspace_title: string | null;
+  work_package_id: string | null;
+  work_package_name: string | null;
+  invoice_number: string;
+  title: string | null;
+  amount_cents: string | number | null;
+  currency: string;
+  status: string;
+  due_date: string | Date | null;
+  paid_at: string | Date | null;
+  review_notes: string | null;
+  reviewed_at: string | Date | null;
+  reviewed_by: string | null;
+  reviewed_by_email: string | null;
+  supplier_company_id: string | null;
+  supplier_company_name: string | null;
+  created_at: string | Date;
+}): ClientInvoice {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    workspaceTitle: r.workspace_title,
+    workPackageId: r.work_package_id,
+    workPackageName: r.work_package_name,
+    invoiceNumber: r.invoice_number,
+    title: r.title,
+    amountCents: r.amount_cents != null ? Number(r.amount_cents) : 0,
+    currency: r.currency,
+    status: mapInvoiceStatus(r.status),
+    dueDate: r.due_date ? String(r.due_date) : null,
+    paidAt: r.paid_at ? String(r.paid_at) : null,
+    reviewNotes: r.review_notes,
+    reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+    reviewedByUserId: r.reviewed_by,
+    reviewedByEmail: r.reviewed_by_email,
+    supplierCompanyId: r.supplier_company_id,
+    supplierCompanyName: r.supplier_company_name,
+    createdAt: String(r.created_at),
+  };
+}

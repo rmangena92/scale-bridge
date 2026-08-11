@@ -953,3 +953,335 @@ export type ClientTeamMember = {
   isSelf: boolean;
 };
 
+// ------------------------------------------------- client portal Part B
+// Documents / milestones / reports / issues / variations / invoices and the
+// approvals hub. Status values are the client-facing lifecycle; the server
+// maps the legacy lead-portal statuses onto these enums so the client portal
+// sees one consistent vocabulary.
+
+export const CLIENT_DOCUMENT_STATUSES = [
+  "draft",
+  "published",
+  "under_review",
+  "approved",
+  "needs_changes",
+] as const;
+
+export type ClientDocumentStatus = (typeof CLIENT_DOCUMENT_STATUSES)[number];
+
+export const CLIENT_DOCUMENT_STATUS_LABELS: Record<ClientDocumentStatus, string> = {
+  draft: "Draft",
+  published: "Published",
+  under_review: "Under review",
+  approved: "Approved",
+  needs_changes: "Needs changes",
+};
+
+export const CLIENT_DOCUMENT_STATUS_TONES: Record<
+  ClientDocumentStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  draft: "slate",
+  published: "teal",
+  under_review: "amber",
+  approved: "green",
+  needs_changes: "red",
+};
+
+export const CLIENT_DOCUMENT_CATEGORIES = [
+  "sla",
+  "method_statement",
+  "safety",
+  "report",
+  "other",
+] as const;
+
+export type ClientDocumentCategory = (typeof CLIENT_DOCUMENT_CATEGORIES)[number];
+
+export const CLIENT_DOCUMENT_CATEGORY_LABELS: Record<ClientDocumentCategory, string> = {
+  sla: "SLA",
+  method_statement: "Method statement",
+  safety: "Safety",
+  report: "Report",
+  other: "Other",
+};
+
+/** One contract document visible to the client org. */
+export type ClientDocument = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  title: string;
+  fileName: string | null;
+  category: ClientDocumentCategory | null;
+  status: ClientDocumentStatus;
+  uploadedByUserId: string | null;
+  uploadedByEmail: string | null;
+  sharedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ClientDocumentReviewDecision = "approved" | "needs_changes";
+
+export const CLIENT_MILESTONE_STATUSES = [
+  "planned",
+  "in_progress",
+  "submitted",
+  "approved",
+  "needs_changes",
+  "completed",
+] as const;
+
+export type ClientMilestoneStatus = (typeof CLIENT_MILESTONE_STATUSES)[number];
+
+export const CLIENT_MILESTONE_STATUS_LABELS: Record<ClientMilestoneStatus, string> = {
+  planned: "Planned",
+  in_progress: "In progress",
+  submitted: "Submitted for review",
+  approved: "Approved",
+  needs_changes: "Needs changes",
+  completed: "Completed",
+};
+
+export const CLIENT_MILESTONE_STATUS_TONES: Record<
+  ClientMilestoneStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  planned: "slate",
+  in_progress: "blue",
+  submitted: "amber",
+  approved: "teal",
+  needs_changes: "red",
+  completed: "green",
+};
+
+/** One delivery milestone on the org's contracts. */
+export type ClientMilestone = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  status: ClientMilestoneStatus;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewedByEmail: string | null;
+  createdAt: string;
+};
+
+export type ClientMilestoneReviewDecision = "approved" | "needs_changes";
+
+/** One progress report on the org's contracts (read-only for clients). */
+export type ClientProgressReport = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  milestoneId: string | null;
+  milestoneTitle: string | null;
+  title: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  body: string | null;
+  submittedByUserId: string | null;
+  submittedByEmail: string | null;
+  createdAt: string;
+};
+
+export const CLIENT_ISSUE_SEVERITIES = ["low", "medium", "high"] as const;
+
+export type ClientIssueSeverity = (typeof CLIENT_ISSUE_SEVERITIES)[number];
+
+export const CLIENT_ISSUE_SEVERITY_LABELS: Record<ClientIssueSeverity, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+export const CLIENT_ISSUE_SEVERITY_TONES: Record<
+  ClientIssueSeverity,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  low: "slate",
+  medium: "blue",
+  high: "red",
+};
+
+export const CLIENT_ISSUE_STATUSES = ["open", "under_review", "responded", "closed"] as const;
+
+export type ClientIssueStatus = (typeof CLIENT_ISSUE_STATUSES)[number];
+
+export const CLIENT_ISSUE_STATUS_LABELS: Record<ClientIssueStatus, string> = {
+  open: "Open",
+  under_review: "Under review",
+  responded: "Responded",
+  closed: "Closed",
+};
+
+export const CLIENT_ISSUE_STATUS_TONES: Record<
+  ClientIssueStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  open: "red",
+  under_review: "amber",
+  responded: "blue",
+  closed: "slate",
+};
+
+/** One issue on the org's contracts, including any lead response. */
+export type ClientIssue = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  title: string;
+  description: string | null;
+  severity: ClientIssueSeverity | null;
+  status: ClientIssueStatus;
+  response: string | null;
+  respondedAt: string | null;
+  respondedByUserId: string | null;
+  respondedByEmail: string | null;
+  raisedByUserId: string | null;
+  raisedByEmail: string | null;
+  createdAt: string;
+};
+
+export const CLIENT_VARIATION_STATUSES = [
+  "proposed",
+  "under_review",
+  "approved",
+  "rejected",
+  "clarification_needed",
+  "conditions",
+] as const;
+
+export type ClientVariationStatus = (typeof CLIENT_VARIATION_STATUSES)[number];
+
+export const CLIENT_VARIATION_STATUS_LABELS: Record<ClientVariationStatus, string> = {
+  proposed: "Proposed",
+  under_review: "Under review",
+  approved: "Approved",
+  rejected: "Rejected",
+  clarification_needed: "Clarification needed",
+  conditions: "Approved with conditions",
+};
+
+export const CLIENT_VARIATION_STATUS_TONES: Record<
+  ClientVariationStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  proposed: "blue",
+  under_review: "amber",
+  approved: "green",
+  rejected: "red",
+  clarification_needed: "blue",
+  conditions: "teal",
+};
+
+/** One contract variation for the client to review/decide. */
+export type ClientVariation = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  title: string;
+  description: string | null;
+  reason: string | null;
+  proposedAmountCents: number | null;
+  status: ClientVariationStatus;
+  conditions: string | null;
+  decidedAt: string | null;
+  decidedByUserId: string | null;
+  decidedByEmail: string | null;
+  createdAt: string;
+};
+
+export type ClientVariationDecision =
+  | "approved"
+  | "rejected"
+  | "clarification_needed"
+  | "conditions";
+
+export const CLIENT_INVOICE_STATUSES = [
+  "submitted",
+  "under_review",
+  "approved",
+  "rejected",
+  "corrections_requested",
+  "paid",
+] as const;
+
+export type ClientInvoiceStatus = (typeof CLIENT_INVOICE_STATUSES)[number];
+
+export const CLIENT_INVOICE_STATUS_LABELS: Record<ClientInvoiceStatus, string> = {
+  submitted: "Submitted",
+  under_review: "Under review",
+  approved: "Approved",
+  rejected: "Rejected",
+  corrections_requested: "Corrections requested",
+  paid: "Paid",
+};
+
+export const CLIENT_INVOICE_STATUS_TONES: Record<
+  ClientInvoiceStatus,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  submitted: "blue",
+  under_review: "amber",
+  approved: "teal",
+  rejected: "red",
+  corrections_requested: "red",
+  paid: "green",
+};
+
+/** One invoice on the org's contracts, as seen by the client finance team. */
+export type ClientInvoice = {
+  id: string;
+  workspaceId: string;
+  workspaceTitle: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  invoiceNumber: string;
+  title: string | null;
+  amountCents: number;
+  currency: string;
+  status: ClientInvoiceStatus;
+  dueDate: string | null;
+  paidAt: string | null;
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewedByEmail: string | null;
+  supplierCompanyId: string | null;
+  supplierCompanyName: string | null;
+  createdAt: string;
+};
+
+export type ClientInvoiceDecision =
+  | "approved"
+  | "rejected"
+  | "corrections_requested";
+
+/** Approvals hub: pending items needing the client org's attention. */
+export type ClientApprovals = {
+  counts: {
+    variations: number;
+    invoices: number;
+    milestones: number;
+    documents: number;
+    issues: number;
+  };
+  variations: ClientVariation[];
+  invoices: ClientInvoice[];
+  milestones: ClientMilestone[];
+  documents: ClientDocument[];
+  issues: ClientIssue[];
+};
+

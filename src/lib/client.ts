@@ -10,21 +10,42 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import {
+  doGetClientApprovals,
   doGetClientContract,
   doGetClientDashboard,
   doGetClientOrg,
+  doGetClientProgressReport,
   doGetClientSession,
   doGetClientSettings,
   doInviteClientMember,
   doListClientContracts,
+  doListClientDocuments,
+  doListClientInvoices,
+  doListClientIssues,
+  doListClientMilestones,
+  doListClientProgressReports,
   doListClientTeam,
+  doListClientVariations,
+  doRaiseClientIssue,
+  doReviewClientDocument,
+  doReviewClientInvoice,
+  doReviewClientMilestone,
+  doReviewClientVariation,
   doUpdateClientMemberRole,
   doUpdateClientOrg,
   doUpdateClientProfile,
 
 } from "./client-core";
 import type { ClientRole } from "./types";
-import type { ClientOrgMembership, ClientSession } from "./types";
+import type {
+  ClientDocumentReviewDecision,
+  ClientInvoiceDecision,
+  ClientIssueSeverity,
+  ClientMilestoneReviewDecision,
+  ClientOrgMembership,
+  ClientSession,
+  ClientVariationDecision,
+} from "./types";
 
 export type {
   ClientResult,
@@ -110,3 +131,106 @@ export const getClientSettings = createServerFn({ method: "GET" }).handler(() =>
 export const updateClientProfile = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { name: string })
   .handler(({ data }) => doUpdateClientProfile(data));
+
+// ------------------------------------------------------- client portal Part B
+
+export const listClientDocuments = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientDocuments(data.orgId, data.workspaceId));
+
+export const reviewClientDocument = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        documentId: string;
+        decision: ClientDocumentReviewDecision;
+        comment?: string;
+      },
+  )
+  .handler(({ data }) => doReviewClientDocument(data));
+
+export const listClientMilestones = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientMilestones(data.orgId, data.workspaceId));
+
+export const reviewClientMilestone = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        milestoneId: string;
+        decision: ClientMilestoneReviewDecision;
+        comment?: string;
+      },
+  )
+  .handler(({ data }) => doReviewClientMilestone(data));
+
+export const listClientProgressReports = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientProgressReports(data.orgId, data.workspaceId));
+
+export const getClientProgressReport = createServerFn({ method: "GET" })
+  .validator(
+    (d: unknown) => d as { orgId: string; workspaceId: string; reportId: string },
+  )
+  .handler(({ data }) => doGetClientProgressReport(data));
+
+export const listClientIssues = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientIssues(data.orgId, data.workspaceId));
+
+export const raiseClientIssue = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        workPackageId?: string | null;
+        title: string;
+        description: string;
+        severity: ClientIssueSeverity;
+      },
+  )
+  .handler(({ data }) => doRaiseClientIssue(data));
+
+export const listClientVariations = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientVariations(data.orgId, data.workspaceId));
+
+export const reviewClientVariation = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        variationId: string;
+        decision: ClientVariationDecision;
+        conditions?: string;
+        reason?: string;
+      },
+  )
+  .handler(({ data }) => doReviewClientVariation(data));
+
+export const listClientInvoices = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doListClientInvoices(data.orgId, data.workspaceId));
+
+export const reviewClientInvoice = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        invoiceId: string;
+        decision: ClientInvoiceDecision;
+        reviewNotes?: string;
+      },
+  )
+  .handler(({ data }) => doReviewClientInvoice(data));
+
+export const getClientApprovals = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doGetClientApprovals(data.orgId));

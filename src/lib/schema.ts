@@ -1287,4 +1287,97 @@ export const SCHEMA_SQL: string[] = [
   `create policy documents_delete on documents for delete using (
     ${IS_ADMIN} or documents.lead_contractor_id = ${UID}
   )`,
+
+  // ------------------------------------------------------------------
+  // Client Portal Part B (idempotent) — the delivery tables (milestones,
+  // issues, variations, invoices, progress_reports, documents) already exist
+  // with the client-scoped RLS policies above (SELECT for members of the row's
+  // client_org; UPDATE for client_admin/client_pm/(client_finance|client_reviewer)
+  // when the org is live-linked via contract_clients). Part B therefore only
+  // EXTENDS the tables with the client-workflow columns + status values the
+  // Client Portal needs (review/decision metadata, client-facing statuses) and
+  // adds matching indexes. No new tables, no new policies — duplicating the
+  // tables would orphan the Part A client dashboard/contract queries.
+  // ------------------------------------------------------------------
+
+  // --- documents (contract docs): client-visible lifecycle + sharing meta.
+  `alter table documents add column if not exists file_name text`,
+  `alter table documents add column if not exists shared_at timestamptz`,
+  // documents predates the client portal and has no created_at/updated_at;
+  // add them so client lists can sort/display consistently with the other
+  // delivery tables (legacy rows default to now()).
+  `alter table documents add column if not exists created_at timestamptz not null default now()`,
+  `alter table documents add column if not exists updated_at timestamptz not null default now()`,
+  // Client-facing lifecycle (distinct from documents.review_status, which is
+  // the ScaleBridge admin compliance review). Legacy rows default 'published'.
+  `alter table documents add column if not exists status text not null default 'published'`,
+  `alter table documents drop constraint if exists documents_status_check`,
+  `alter table documents add constraint documents_status_check check (
+    status in ('draft','published','under_review','approved','needs_changes')
+  )`,
+
+  // --- milestones: client review workflow (submitted_at / reviewed_at/by).
+  `alter table milestones add column if not exists submitted_at timestamptz`,
+  `alter table milestones add column if not exists reviewed_at timestamptz`,
+  `alter table milestones add column if not exists reviewed_by uuid references users(id) on delete set null`,
+  // Client-facing statuses added alongside the legacy lead-portal ones.
+  `alter table milestones drop constraint if exists milestones_status_check`,
+  `alter table milestones add constraint milestones_status_check check (
+    status in ('upcoming','in_progress','submitted_for_review','approved','rejected','requires_clarification','delayed','completed','planned','submitted','needs_changes')
+  )`,
+
+  // --- issues: client response channel (response text + who/when) + raiser.
+  `alter table issues add column if not exists response text`,
+  `alter table issues add column if not exists responded_at timestamptz`,
+  `alter table issues add column if not exists responded_by uuid references users(id) on delete set null`,
+  `alter table issues add column if not exists raised_by uuid references users(id) on delete set null`,
+  `alter table issues drop constraint if exists issues_status_check`,
+  `alter table issues add constraint issues_status_check check (
+    status in ('open','under_review','action_required','waiting_client','waiting_contractor','resolved','closed','responded')
+  )`,
+
+  // --- variations: client decision workflow (amount in cents, conditions,
+  // decision metadata). Client-facing statuses added alongside the legacy ones.
+  `alter table variations add column if not exists work_package_id uuid references work_packages(id) on delete set null`,
+  `alter table variations add column if not exists proposed_amount_cents bigint`,
+  `alter table variations add column if not exists conditions text`,
+  `alter table variations add column if not exists decided_at timestamptz`,
+  `alter table variations add column if not exists decided_by uuid references users(id) on delete set null`,
+  `alter table variations drop constraint if exists variations_status_check`,
+  `alter table variations add constraint variations_status_check check (
+    status in ('draft','submitted','under_client_review','clarification_requested','approved','rejected','approved_with_conditions','implemented','proposed','under_review','clarification_needed','conditions')
+  )`,
+
+  // --- invoices: client finance workflow (cents, currency, due/paid dates,
+  // review notes + reviewer, issuing supplier company).
+  `alter table invoices add column if not exists amount_cents bigint`,
+  `alter table invoices add column if not exists currency text not null default 'GBP'`,
+  `alter table invoices add column if not exists due_date date`,
+  `alter table invoices add column if not exists paid_at timestamptz`,
+  `alter table invoices add column if not exists review_notes text`,
+  `alter table invoices add column if not exists reviewed_at timestamptz`,
+  `alter table invoices add column if not exists reviewed_by uuid references users(id) on delete set null`,
+  `alter table invoices add column if not exists supplier_company_id uuid references companies(id) on delete set null`,
+  `alter table invoices drop constraint if exists invoices_status_check`,
+  `alter table invoices add constraint invoices_status_check check (
+    status in ('draft','submitted','under_review','approved','rejected','correction_required','scheduled_for_payment','paid','overdue','cancelled','corrections_requested')
+  )`,
+
+  // --- progress_reports: client-facing title / period / body (+ optional
+  // milestone link). The lead-side rich fields (reporting_period,
+  // overall_progress, work_package_progress, …) remain untouched.
+  `alter table progress_reports add column if not exists milestone_id uuid references milestones(id) on delete set null`,
+  `alter table progress_reports add column if not exists title text`,
+  `alter table progress_reports add column if not exists period_start date`,
+  `alter table progress_reports add column if not exists period_end date`,
+  `alter table progress_reports add column if not exists body text`,
+
+  // Part B indexes (idempotent).
+  `create index if not exists documents_status_idx on documents (status)`,
+  `create index if not exists milestones_submitted_at_idx on milestones (submitted_at)`,
+  `create index if not exists issues_raised_by_idx on issues (raised_by)`,
+  `create index if not exists variations_decided_at_idx on variations (decided_at)`,
+  `create index if not exists invoices_due_date_idx on invoices (due_date)`,
+  `create index if not exists invoices_supplier_company_idx on invoices (supplier_company_id)`,
+  `create index if not exists progress_reports_milestone_id_idx on progress_reports (milestone_id)`,
 ];

@@ -2,10 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { getAdminSession, listDisputes } from "~/lib/admin";
 import {
+  SUPPORT_CASE_BADGE_TONES,
   SUPPORT_CASE_PRIORITY_LABELS,
   SUPPORT_CASE_PRIORITY_TONES,
   SUPPORT_CASE_STATUS_LABELS,
-  } from "~/lib/types";
+} from "~/lib/types";
 import { Badge, Card, DbSetupPage, EmptyState, ErrorText } from "~/components/ui";
 
 export const Route = createFileRoute("/admin/disputes")({

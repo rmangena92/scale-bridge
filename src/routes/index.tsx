@@ -332,6 +332,14 @@ function SiteNav() {
             </a>
           ))}
         </nav>
+        <ButtonLink
+          to="/login"
+          variant="ghost"
+          size="sm"
+          className="ml-4 shrink-0 border border-slate-200 bg-white"
+        >
+          Login
+        </ButtonLink>
       </div>
     </header>
   );

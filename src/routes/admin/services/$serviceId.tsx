@@ -15,7 +15,7 @@ import {
 import type {
   ServiceCategoryRow,
   ServiceDetailResult,
-  ServiceEvidenceListResult,
+  ServiceEvidenceItem,
   ServiceRow,
   ServiceStatus,
 } from "~/lib/services";
@@ -66,7 +66,7 @@ export const Route = createFileRoute("/admin/services/$serviceId")({
 function ServiceDetailPage() {
   const loader = Route.useLoaderData();
   const [detail, setDetail] = useState<ServiceDetailResult | null>(loader.initialDetail);
-  const [evidence, setEvidence] = useState<ServiceEvidenceListResult["evidence"]>(
+  const [evidence, setEvidence] = useState<ServiceEvidenceItem[]>(
     loader.initialEvidence,
   );
   const [error, setError] = useState<string | null>(loader.loadError);
@@ -89,11 +89,12 @@ function ServiceDetailPage() {
       </div>
     );
   }
+  const serviceId = detail.service.id;
 
   async function refresh() {
     const [d, e] = await Promise.all([
-      getServiceDetail({ data: { serviceId: detail.service.id } }),
-      getServiceEvidence({ data: { serviceId: detail.service.id } }),
+      getServiceDetail({ data: { serviceId } }),
+      getServiceEvidence({ data: { serviceId } }),
     ]);
     if (d.ok) setDetail(d);
     if (e.ok) setEvidence(e.evidence);
@@ -270,7 +271,7 @@ function ProvidersCard({ detail }: { detail: Extract<ServiceDetailResult, { ok: 
 function EvidenceCard({
   evidence,
 }: {
-  evidence: ServiceEvidenceListResult["evidence"];
+  evidence: ServiceEvidenceItem[];
 }) {
   return (
     <Card>

@@ -47,6 +47,7 @@ function CategoriesPage() {
     );
   }
   if (!loader.admin) return null;
+  const admin = loader.admin;
 
   async function reload() {
     const result = await listServiceCategories();
@@ -101,7 +102,7 @@ function CategoriesPage() {
                     <CategoryRow
                       key={c.id}
                       category={c}
-                      adminCanMutate={loader.admin.canMutate}
+                      adminCanMutate={admin.canMutate}
                       onSaved={reload}
                       onError={setError}
                     />
@@ -113,7 +114,7 @@ function CategoriesPage() {
         </div>
 
         <CreateCategoryCard
-          adminCanMutate={loader.admin.canMutate}
+          adminCanMutate={admin.canMutate}
           onCreated={reload}
           onError={setError}
         />

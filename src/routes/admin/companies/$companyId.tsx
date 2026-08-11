@@ -69,6 +69,230 @@ const statusTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" |
 };
 
 
+const CATALOGUE_NOTE = "Arrives with the services catalogue build.";
+type TabKey =
+  | "overview"
+  | "information"
+  | "services"
+  | "evidence"
+  | "contracts"
+  | "opportunities"
+  | "documents"
+  | "verification"
+  | "contacts"
+  | "ai"
+  | "upsells"
+  | "activity"
+  | "notes";
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "information", label: "Company Information" },
+  { key: "services", label: "Services" },
+  { key: "evidence", label: "Service Evidence" },
+  { key: "contracts", label: "Contracts" },
+  { key: "opportunities", label: "Opportunities" },
+  { key: "documents", label: "Documents" },
+  { key: "verification", label: "Verification" },
+  { key: "contacts", label: "Contacts" },
+  { key: "ai", label: "AI Insights" },
+  { key: "upsells", label: "Upsell Opportunities" },
+  { key: "activity", label: "Activity" },
+  { key: "notes", label: "Internal Notes" },
+];
+function CompanyDetailPage() {
+  const { setupRequired, admin, detail, loadError, relationships, relationshipsError } =
+    Route.useLoaderData();
+  if (setupRequired) {
+    return (
+      <DbSetupPage title="Company profile">
+        Connect a Postgres database (DATABASE_URL) to manage companies.
+      </DbSetupPage>
+    );
+  }
+  if (!admin) return null;
+  if (!detail) {
+    return (
+      <div className="mb-6">
+        <ErrorText>{loadError ?? "Company not found."}</ErrorText>
+        <Link to="/admin/companies" className="mt-4 inline-block text-sm font-semibold text-brand hover:underline">
+          ← Back to companies
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <CompanyDetailBody
+      adminCanMutate={admin.canMutate}
+      detail={detail}
+      relationships={relationships}
+      relationshipsError={relationshipsError}
+    />
+  );
+}
+function CompanyDetailBody({
+  adminCanMutate,
+  detail,
+  relationships: initialRelationships,
+  relationshipsError: initialRelationshipsError,
+}: {
+  adminCanMutate: boolean;
+  detail: AdminCompanyDetail;
+  relationships: CompanyServiceRow[];
+  relationshipsError: string | null;
+}) {
+  const [status, setStatus] = useState(detail.company.verificationStatus);
+  const [tab, setTab] = useState<TabKey>("overview");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [relationships, setRelationships] =
+    useState<CompanyServiceRow[]>(initialRelationships);
+  const [relationshipsError, setRelationshipsError] =
+    useState<string | null>(initialRelationshipsError);
+
+  function guard(): boolean {
+    if (!adminCanMutate) {
+      setError("Your role is read-only — changes are not permitted.");
+      setFlash(null);
+      return false;
+    }
+    setError(null);
+    setFlash(null);
+    return true;
+  }
+
+  async function runAction(action: "verify" | "reject" | "suspend" | "restore") {
+    if (!guard()) return;
+    setBusy(true);
+    const result = await setAdminCompanyStatus({
+      data: { companyId: detail.company.id, action },
+    });
+    setBusy(false);
+    if (result.ok) {
+      const next =
+        action === "verify" ? "verified" : action === "reject" ? "rejected" : action === "suspend" ? "suspended" : "registered";
+      setStatus(next);
+      setFlash(`Company ${action === "restore" ? "restored" : action + "d"} ✓`);
+    } else {
+      setError(result.error);
+    }
+  }
+
+  async function refreshRelationships() {
+    const rels = await listCompanyServices({ data: { companyId: detail.company.id } });
+    if (rels.ok) {
+      setRelationships(rels.relationships);
+      setRelationshipsError(null);
+    } else {
+      setRelationshipsError(rels.error);
+    }
+  }
+
+  const c = detail.company;
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-widest text-teal">Companies</p>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold">{c.name}</h1>
+            <Badge tone={statusTones[status] ?? "slate"}>{COMPANY_STATUS_LABELS[status]}</Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted">{c.type ?? "—"}</p>
+        </div>
+        <Link to="/admin/companies" className="text-sm font-semibold text-brand hover:underline">
+          ← Back to companies
+        </Link>
+      </div>
+
+      {error && (
+        <div className="mb-5">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+      {flash && (
+        <p className="mb-5 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm font-medium text-success">
+          {flash}
+        </p>
+      )}
+
+      {/* tab bar */}
+      <div className="mb-6 flex flex-wrap gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[var(--shadow-card)]">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => {
+              setTab(t.key);
+              setError(null);
+              setFlash(null);
+            }}
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+              tab === t.key
+                ? "bg-navy text-white"
+                : "text-muted hover:bg-mist hover:text-navy"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "overview" && (
+        <OverviewTab detail={detail} status={status} onAction={runAction} adminCanMutate={adminCanMutate} busy={busy} onTab={setTab} />
+      )}
+      {tab === "information" && <InformationTab detail={detail} />}
+      {tab === "services" && <ServicesTab relationships={relationships} relationshipsError={relationshipsError} />}
+      {tab === "evidence" && <EvidenceTab relationships={relationships} />}
+      {tab === "contracts" && <ContractsTab detail={detail} />}
+      {tab === "opportunities" && (
+        <CatalogueEmptyState
+          title="Opportunities"
+          body="Contract opportunities matched to this company arrive with the services catalogue build."
+        />
+      )}
+      {tab === "documents" && <DocumentsTab detail={detail} />}
+      {tab === "verification" && <VerificationTab detail={detail} />}
+      {tab === "contacts" && <ContactsTab detail={detail} />}
+      {tab === "ai" && (
+        <AiInsightsTab
+          relationships={relationships}
+          adminCanMutate={adminCanMutate}
+          onRefresh={refreshRelationships}
+          onError={setError}
+          onFlash={setFlash}
+        />
+      )}
+      {tab === "upsells" && (
+        <UpsellsTab
+          relationships={relationships}
+          adminCanMutate={adminCanMutate}
+          onRefresh={refreshRelationships}
+          onError={setError}
+          onFlash={setFlash}
+        />
+      )}
+      {tab === "activity" && <ActivityTab detail={detail} />}
+      {tab === "notes" && <NotesTab detail={detail} adminCanMutate={adminCanMutate} />}
+    </div>
+  );
+}
+function SectionHeading({ title, body }: { title: string; body?: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-lg font-bold">{title}</h2>
+      {body && <p className="mt-1 text-sm text-muted">{body}</p>}
+    </div>
+  );
+}
+function CatalogueEmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div>
+      <SectionHeading title={title} body={CATALOGUE_NOTE} />
+      <EmptyState title={`No ${title.toLowerCase()} yet`} body={body} />
+    </div>
+  );
+}
 // ---------------------------------------------------------------- Overview
 function OverviewTab({
   detail,

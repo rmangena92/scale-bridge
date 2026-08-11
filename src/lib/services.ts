@@ -21,6 +21,7 @@ import type { Tx, TxQuery } from "./db";
 import { auditQuery } from "./audit";
 import { loadAdminUser } from "./auth-core";
 import { SERVICE_STATUSES } from "./service-types";
+import type { ServiceStatus } from "./service-types";
 
 // ------------------------------------------------------------- catalogue enums
 export { SERVICE_STATUSES, type ServiceStatus } from "./service-types";
@@ -1161,24 +1162,22 @@ export async function doListCatalogueOpportunities(input: {
 }
 
 // ------------------------------------------------- service evidence (service-scoped)
+export type ServiceEvidenceItem = {
+  id: string;
+  companyServiceId: string;
+  companyId: string;
+  companyName: string;
+  evidenceType: string | null;
+  title: string | null;
+  sourceUrl: string | null;
+  excerpt: string | null;
+  capturedAt: string | null;
+  agentVersion: string | null;
+  createdAt: string;
+};
+
 export type ServiceEvidenceListResult =
-  | {
-      ok: true;
-      evidence: {
-        id: string;
-        companyServiceId: string;
-        companyId: string;
-        companyName: string;
-        evidenceType: string | null;
-        title: string | null;
-        sourceUrl: string | null;
-        excerpt: string | null;
-        capturedAt: string | null;
-        agentVersion: string | null;
-        createdAt: string;
-      }[];
-      total: number;
-    }
+  | { ok: true; evidence: ServiceEvidenceItem[]; total: number }
   | { ok: false; error: string; setupRequired?: boolean };
 
 /** Evidence rows across every company relationship of one service. */

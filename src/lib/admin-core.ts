@@ -221,7 +221,7 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
             typeof r.details === "string"
               ? (JSON.parse(r.details) as AuditDetails)
               : ((r.details as AuditDetails | null) ?? null),
-          createdAt: String(r.created_at),
+          createdAt: r.created_at ? String(r.created_at) : null,
         })),
         expiringLicences: licences.map((r) => ({
           id: r.id,

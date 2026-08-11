@@ -323,9 +323,13 @@ export type AdminDashboardStats = {
   companiesVerified: number;
   companiesAwaitingVerification: number;
   activeContracts: number;
-  // Catalogue/AI surfaces: 0 with an 'available after services catalogue build'
-  // note until the services catalogue (plan item 2) and AI layers land.
+  // Catalogue/AI surfaces: services catalogue (plan item 2) + AI layers
+  // (plan items 5–6). servicesListed excludes Rejected/Archived; opportunities
+  // open = aiDiscoveries + upsellRecommendations (both admin_decision null).
   servicesListed: number;
+  servicesVerified: number;
+  servicesPendingReview: number;
+  lowCoverageServices: number; // services with < 2 verified providers
   opportunitiesOpen: number;
   aiDiscoveries: number;
   upsellRecommendations: number;

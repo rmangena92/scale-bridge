@@ -46,6 +46,19 @@ import {
   doSetUserSystemRole,
   doUpdateSupportCase,
 } from "./admin-core";
+import {
+  doAddServiceEvidence,
+  doCreateOrUpdateCompanyService,
+  doCreateService,
+  doGetServiceDetail,
+  doListCompanyServices,
+  doListServiceCategories,
+  doListServices,
+  doMergeServices,
+  doSetCompanyServiceDecision,
+  doSetServiceStatus,
+  doUpdateService,
+} from "./services";
 import type {
   AdminRole,
   DocumentReviewAction,
@@ -54,6 +67,13 @@ import type {
   SupportCaseStatus,
   UserStatus,
 } from "./types";
+import type {
+  AdminDecision,
+  CompanyServiceInput,
+  ServiceEvidenceInput,
+  ServiceInput,
+  ServiceStatus,
+} from "./services";
 
 export type {
   AdminContractDetailResult,
@@ -76,6 +96,12 @@ export type {
   VerificationCompanyResult,
   VerificationQueueResult,
 } from "./admin-core";
+export type {
+  CompanyServicesResult,
+  ServiceCategoriesResult,
+  ServiceDetailResult,
+  ServicesResult,
+} from "./services";
 
 export const getAdminSession = createServerFn({ method: "GET" }).handler(() =>
   doGetAdminSession(),
@@ -275,3 +301,67 @@ export const listAuditLog = createServerFn({ method: "GET" })
 export const listAdminStaff = createServerFn({ method: "GET" }).handler(() =>
   doListAdminStaff(),
 );
+
+// ---------------------------------------------------- catalogue fns (plan item 2)
+export const listServiceCategories = createServerFn({ method: "GET" }).handler(() =>
+  doListServiceCategories(),
+);
+
+export const listServices = createServerFn({ method: "GET" })
+  .validator(
+    (d: unknown) =>
+      d as { status?: string; categoryId?: string; industry?: string; search?: string },
+  )
+  .handler(({ data }) => doListServices(data));
+
+export const getServiceDetail = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { serviceId: string })
+  .handler(({ data }) => doGetServiceDetail(data.serviceId));
+
+export const createService = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as ServiceInput)
+  .handler(({ data }) => doCreateService(data));
+
+export const updateService = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { serviceId: string; input: ServiceInput })
+  .handler(({ data }) => doUpdateService(data.serviceId, data.input));
+
+export const setServiceStatus = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { serviceId: string; status: ServiceStatus })
+  .handler(({ data }) => doSetServiceStatus(data.serviceId, data.status));
+
+export const mergeServices = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { keepId: string; mergeIds: string[] })
+  .handler(({ data }) => doMergeServices(data.keepId, data.mergeIds));
+
+export const listCompanyServices = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string })
+  .handler(({ data }) => doListCompanyServices(data.companyId));
+
+export const createOrUpdateCompanyService = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as CompanyServiceInput)
+  .handler(({ data }) => doCreateOrUpdateCompanyService(data));
+
+export const addServiceEvidence = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { companyServiceId: string; input: ServiceEvidenceInput },
+  )
+  .handler(({ data }) => doAddServiceEvidence(data.companyServiceId, data.input));
+
+export const setCompanyServiceDecision = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        companyServiceId: string;
+        adminDecision: AdminDecision;
+        reviewedBy?: string | null;
+        notes?: string | null;
+      },
+  )
+  .handler(({ data }) =>
+    doSetCompanyServiceDecision(data.companyServiceId, {
+      adminDecision: data.adminDecision,
+      reviewedBy: data.reviewedBy,
+      notes: data.notes,
+    }),
+  );

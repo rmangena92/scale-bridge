@@ -152,6 +152,21 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
            and d.expiry_date between (now()::date) and (now()::date + interval '90 days')
          order by d.expiry_date asc
          limit 20`,
+      // Catalogue/AI surfaces (plan item 2 — services catalogue). Queries are
+      // appended AFTER the legacy batch so existing indices stay stable.
+      tx`select count(*)::int as n from services
+         where status not in ('Rejected','Archived')`,
+      tx`select count(*)::int as n from services where status = 'Verified'`,
+      tx`select count(*)::int as n from services
+         where status in ('Pending Review','AI Suggested','Client Intake Suggested')`,
+      tx`select count(*)::int as n from services s
+         where s.status not in ('Rejected','Archived')
+           and (select count(*) from company_services cs
+                where cs.service_id = s.id and cs.verification_status = 'Verified') < 2`,
+      tx`select count(*)::int as n from company_services
+         where source = 'AI discovery' and admin_decision is null`,
+      tx`select count(*)::int as n from company_services
+         where upsell_recommended = true and admin_decision is null`,
     ]);
     // asUser() returns [set_config_rows, ...query_rows] — real results start at [1].
     // n(q) reads the q-th query's rows (rows[q + 1]); q indexes the batch above.
@@ -188,12 +203,16 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
         pendingDocumentReviews: n(9),
         outstandingPayments: Number(payments[0]?.total ?? 0),
         monthlyRecurringRevenue: 0, // subscriptions ship in Part B
-        // Catalogue/AI surfaces: no tables exist yet — honest zeros, the UI
-        // shows the 'available after services catalogue build' note.
-        servicesListed: 0,
-        opportunitiesOpen: 0,
-        aiDiscoveries: 0,
-        upsellRecommendations: 0,
+        // Catalogue/AI surfaces (plan item 2 — services catalogue, live).
+        // aiDiscoveries/upsellRecommendations count rows with admin_decision
+        // null (still open for review); opportunitiesOpen is their sum.
+        servicesListed: n(14),
+        servicesVerified: n(15),
+        servicesPendingReview: n(16),
+        lowCoverageServices: n(17),
+        aiDiscoveries: n(18),
+        upsellRecommendations: n(19),
+        opportunitiesOpen: n(18) + n(19),
         recentActivity: activity.map((r) => ({
           id: r.id,
           action: r.action,

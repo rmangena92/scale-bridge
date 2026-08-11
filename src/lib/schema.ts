@@ -523,6 +523,76 @@ export const SCHEMA_SQL: string[] = [
   )`,
 
   // ------------------------------------------------------------------
+  // Central service catalogue (plan item 2). Admin-managed catalogue data:
+  // service_categories → services → company_services (the service ↔ company
+  // relationship, the heart of the catalogue) → service_evidence (proof rows
+  // behind AI discoveries / verification). Powers the master dashboard
+  // catalogue cards, the /admin/services page, and the company detail
+  // Services / Service Evidence / AI Insights / Upsell tabs. RLS mirrors
+  // company_notes: sb_admin only (companies/clients never see catalogue
+  // internals at the RLS layer; later phases may relax for lead contractors).
+  // ------------------------------------------------------------------
+  `create table if not exists service_categories (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    slug text not null unique,
+    description text,
+    sort_order int not null default 0,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists services (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    slug text not null unique,
+    category_id uuid not null references service_categories(id) on delete restrict,
+    description text,
+    industry text,
+    required_qualifications text[] not null default '{}'::text[],
+    status text not null default 'Listed'
+      check (status in ('Listed','Pending Review','Verified','AI Suggested','Client Intake Suggested','Rejected','Archived')),
+    capacity text,
+    geographic_coverage text,
+    related_service_ids uuid[] not null default '{}'::uuid[],
+    upsell_service_ids uuid[] not null default '{}'::uuid[],
+    created_by uuid references users(id) on delete set null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists company_services (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    service_id uuid not null references services(id) on delete cascade,
+    source text not null default 'company profile'
+      check (source in ('company profile','website','client intake form','uploaded documents','contract participation','manual entry','AI discovery','service proposal','company communication')),
+    confidence text not null default 'Medium'
+      check (confidence in ('High','Medium','Low','Requires manual review')),
+    verification_status text not null default 'Pending'
+      check (verification_status in ('Verified','Pending','Rejected')),
+    evidence_summary text,
+    discovered_at timestamptz,
+    active_with_scalebridge boolean not null default false,
+    upsell_recommended boolean not null default false,
+    admin_decision text
+      check (admin_decision is null or admin_decision in ('Approved','Rejected','Archived')),
+    notes text,
+    reviewed_by uuid references users(id) on delete set null,
+    reviewed_at timestamptz,
+    created_at timestamptz not null default now(),
+    unique (company_id, service_id)
+  )`,
+  `create table if not exists service_evidence (
+    id uuid primary key default gen_random_uuid(),
+    company_service_id uuid not null references company_services(id) on delete cascade,
+    evidence_type text,
+    title text,
+    source_url text,
+    excerpt text,
+    captured_at timestamptz,
+    agent_version text,
+    created_at timestamptz not null default now()
+  )`,
+
+  // ------------------------------------------------------------------
   // Indexes
   // ------------------------------------------------------------------
   `create index if not exists sessions_token_hash_idx on sessions (token_hash)`,
@@ -642,6 +712,14 @@ export const SCHEMA_SQL: string[] = [
   `alter table company_notes force row level security`,
   `alter table messages force row level security`,
   `alter table message_reads force row level security`,
+  `alter table service_categories enable row level security`,
+  `alter table services enable row level security`,
+  `alter table company_services enable row level security`,
+  `alter table service_evidence enable row level security`,
+  `alter table service_categories force row level security`,
+  `alter table services force row level security`,
+  `alter table company_services force row level security`,
+  `alter table service_evidence force row level security`,
 
   // --- profiles: users manage their own profile; sb_admin manages all ----
   `drop policy if exists profiles_select on profiles`,
@@ -1051,6 +1129,43 @@ export const SCHEMA_SQL: string[] = [
   `create policy company_notes_update on company_notes for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
   `drop policy if exists company_notes_delete on company_notes`,
   `create policy company_notes_delete on company_notes for delete using (${IS_ADMIN})`,
+  // --- catalogue tables: internal ScaleBridge data — admins only (mirrors
+  // company_notes). service_categories / services / company_services /
+  // service_evidence are never visible to companies or clients at the RLS
+  // layer; the server decides what (if anything) later phases expose to
+  // lead contractors (e.g. the participating-businesses directory).
+  `drop policy if exists service_categories_select on service_categories`,
+  `create policy service_categories_select on service_categories for select using (${IS_ADMIN})`,
+  `drop policy if exists service_categories_insert on service_categories`,
+  `create policy service_categories_insert on service_categories for insert with check (${IS_ADMIN})`,
+  `drop policy if exists service_categories_update on service_categories`,
+  `create policy service_categories_update on service_categories for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists service_categories_delete on service_categories`,
+  `create policy service_categories_delete on service_categories for delete using (${IS_ADMIN})`,
+  `drop policy if exists services_select on services`,
+  `create policy services_select on services for select using (${IS_ADMIN})`,
+  `drop policy if exists services_insert on services`,
+  `create policy services_insert on services for insert with check (${IS_ADMIN})`,
+  `drop policy if exists services_update on services`,
+  `create policy services_update on services for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists services_delete on services`,
+  `create policy services_delete on services for delete using (${IS_ADMIN})`,
+  `drop policy if exists company_services_select on company_services`,
+  `create policy company_services_select on company_services for select using (${IS_ADMIN})`,
+  `drop policy if exists company_services_insert on company_services`,
+  `create policy company_services_insert on company_services for insert with check (${IS_ADMIN})`,
+  `drop policy if exists company_services_update on company_services`,
+  `create policy company_services_update on company_services for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists company_services_delete on company_services`,
+  `create policy company_services_delete on company_services for delete using (${IS_ADMIN})`,
+  `drop policy if exists service_evidence_select on service_evidence`,
+  `create policy service_evidence_select on service_evidence for select using (${IS_ADMIN})`,
+  `drop policy if exists service_evidence_insert on service_evidence`,
+  `create policy service_evidence_insert on service_evidence for insert with check (${IS_ADMIN})`,
+  `drop policy if exists service_evidence_update on service_evidence`,
+  `create policy service_evidence_update on service_evidence for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists service_evidence_delete on service_evidence`,
+  `create policy service_evidence_delete on service_evidence for delete using (${IS_ADMIN})`,
   // ------------------------------------------------------------------
   // Portal-phase policies (Admin + Client portals).
   //
@@ -1496,4 +1611,10 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists invoices_supplier_company_idx on invoices (supplier_company_id)`,
   `create index if not exists progress_reports_milestone_id_idx on progress_reports (milestone_id)`,
   `create index if not exists company_notes_company_idx on company_notes (company_id, created_at desc)`,
+  // Catalogue indexes (plan item 2).
+  `create index if not exists services_category_idx on services (category_id)`,
+  `create index if not exists services_status_idx on services (status)`,
+  `create index if not exists company_services_company_idx on company_services (company_id)`,
+  `create index if not exists company_services_service_idx on company_services (service_id)`,
+  `create index if not exists service_evidence_company_service_idx on service_evidence (company_service_id)`,
 ];

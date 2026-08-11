@@ -1285,3 +1285,126 @@ export type ClientApprovals = {
   issues: ClientIssue[];
 };
 
+
+// ---------------------------------------------------------------------------
+// Part C: messaging + notifications (client portal).
+// ---------------------------------------------------------------------------
+export const CLIENT_MESSAGE_THREAD_TYPES = [
+  "general",
+  "milestone",
+  "document",
+  "issue",
+  "variation",
+  "invoice",
+  "report",
+  "package",
+] as const;
+export type ClientMessageThreadType = (typeof CLIENT_MESSAGE_THREAD_TYPES)[number];
+export const CLIENT_MESSAGE_THREAD_LABELS: Record<ClientMessageThreadType, string> = {
+  general: "General",
+  milestone: "Milestone",
+  document: "Document",
+  issue: "Issue",
+  variation: "Variation",
+  invoice: "Invoice",
+  report: "Report",
+  package: "Work package",
+};
+/** One message in a client<->lead contract thread. */
+export type ClientMessage = {
+  id: string;
+  workspaceId: string;
+  threadKey: string;
+  threadType: ClientMessageThreadType;
+  body: string;
+  authorUserId: string;
+  authorName: string | null;
+  authorEmail: string;
+  authorSide: "lead" | "client";
+  createdAt: string;
+  read: boolean; // whether the CURRENT user has read it (vs their watermark)
+};
+/** One conversation (thread) shown in the Messages inbox. */
+export type ClientConversation = {
+  workspaceId: string;
+  workspaceTitle: string;
+  leadName: string | null;
+  leadEmail: string | null;
+  leadCompany: string | null;
+  threadKey: string;
+  threadType: ClientMessageThreadType;
+  entityId: string | null;
+  entityTitle: string | null;
+  lastBody: string | null;
+  lastAuthorName: string | null;
+  lastAuthorSide: "lead" | "client" | null;
+  lastMessageAt: string | null;
+  unread: number;
+};
+/** A full thread: header context + messages + the user's read watermark. */
+export type ClientThread = {
+  workspaceId: string;
+  workspaceTitle: string;
+  leadName: string | null;
+  leadEmail: string | null;
+  leadCompany: string | null;
+  threadKey: string;
+  threadType: ClientMessageThreadType;
+  entityId: string | null;
+  entityTitle: string | null;
+  messages: ClientMessage[];
+  lastReadAt: string | null;
+  unread: number;
+};
+export const CLIENT_NOTIFICATION_TYPES = [
+  "invitation",
+  "approval_needed",
+  "new_message",
+  "milestone",
+  "document",
+  "issue",
+  "variation",
+  "invoice",
+  "report",
+  "system",
+] as const;
+export type ClientNotificationType = (typeof CLIENT_NOTIFICATION_TYPES)[number];
+export const CLIENT_NOTIFICATION_TYPE_LABELS: Record<ClientNotificationType, string> = {
+  invitation: "Invitation",
+  approval_needed: "Approval needed",
+  new_message: "New message",
+  milestone: "Milestone",
+  document: "Document",
+  issue: "Issue",
+  variation: "Variation",
+  invoice: "Invoice",
+  report: "Report",
+  system: "System",
+};
+export const CLIENT_NOTIFICATION_TYPE_TONES: Record<
+  ClientNotificationType,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  invitation: "navy",
+  approval_needed: "amber",
+  new_message: "blue",
+  milestone: "teal",
+  document: "slate",
+  issue: "red",
+  variation: "blue",
+  invoice: "teal",
+  report: "slate",
+  system: "navy",
+};
+/** One row of the client notification inbox (scoped to the effective org). */
+export type ClientNotification = {
+  id: string;
+  type: ClientNotificationType;
+  title: string;
+  body: string | null;
+  link: string | null;
+  workspaceId: string | null;
+  workspaceTitle: string | null;
+  read: boolean;
+  createdAt: string;
+};

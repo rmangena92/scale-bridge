@@ -27,6 +27,7 @@ import { Route as ClientSettingsRouteImport } from './routes/client/settings'
 import { Route as ClientReportsRouteImport } from './routes/client/reports'
 import { Route as ClientProjectsRouteImport } from './routes/client/projects'
 import { Route as ClientOrganisationRouteImport } from './routes/client/organisation'
+import { Route as ClientNotificationsRouteImport } from './routes/client/notifications'
 import { Route as ClientMilestonesRouteImport } from './routes/client/milestones'
 import { Route as ClientMessagesRouteImport } from './routes/client/messages'
 import { Route as ClientLoginRouteImport } from './routes/client/login'
@@ -152,6 +153,11 @@ const ClientProjectsRoute = ClientProjectsRouteImport.update({
 const ClientOrganisationRoute = ClientOrganisationRouteImport.update({
   id: '/organisation',
   path: '/organisation',
+  getParentRoute: () => ClientRoute,
+} as any)
+const ClientNotificationsRoute = ClientNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => ClientRoute,
 } as any)
 const ClientMilestonesRoute = ClientMilestonesRouteImport.update({
@@ -369,6 +375,7 @@ export interface FileRoutesByFullPath {
   '/client/login': typeof ClientLoginRoute
   '/client/messages': typeof ClientMessagesRoute
   '/client/milestones': typeof ClientMilestonesRoute
+  '/client/notifications': typeof ClientNotificationsRoute
   '/client/organisation': typeof ClientOrganisationRoute
   '/client/projects': typeof ClientProjectsRoute
   '/client/reports': typeof ClientReportsRoute
@@ -416,6 +423,7 @@ export interface FileRoutesByTo {
   '/client/login': typeof ClientLoginRoute
   '/client/messages': typeof ClientMessagesRoute
   '/client/milestones': typeof ClientMilestonesRoute
+  '/client/notifications': typeof ClientNotificationsRoute
   '/client/organisation': typeof ClientOrganisationRoute
   '/client/projects': typeof ClientProjectsRoute
   '/client/reports': typeof ClientReportsRoute
@@ -473,6 +481,7 @@ export interface FileRoutesById {
   '/client/login': typeof ClientLoginRoute
   '/client/messages': typeof ClientMessagesRoute
   '/client/milestones': typeof ClientMilestonesRoute
+  '/client/notifications': typeof ClientNotificationsRoute
   '/client/organisation': typeof ClientOrganisationRoute
   '/client/projects': typeof ClientProjectsRoute
   '/client/reports': typeof ClientReportsRoute
@@ -531,6 +540,7 @@ export interface FileRouteTypes {
     | '/client/login'
     | '/client/messages'
     | '/client/milestones'
+    | '/client/notifications'
     | '/client/organisation'
     | '/client/projects'
     | '/client/reports'
@@ -578,6 +588,7 @@ export interface FileRouteTypes {
     | '/client/login'
     | '/client/messages'
     | '/client/milestones'
+    | '/client/notifications'
     | '/client/organisation'
     | '/client/projects'
     | '/client/reports'
@@ -634,6 +645,7 @@ export interface FileRouteTypes {
     | '/client/login'
     | '/client/messages'
     | '/client/milestones'
+    | '/client/notifications'
     | '/client/organisation'
     | '/client/projects'
     | '/client/reports'
@@ -797,6 +809,13 @@ declare module '@tanstack/react-router' {
       path: '/organisation'
       fullPath: '/client/organisation'
       preLoaderRoute: typeof ClientOrganisationRouteImport
+      parentRoute: typeof ClientRoute
+    }
+    '/client/notifications': {
+      id: '/client/notifications'
+      path: '/notifications'
+      fullPath: '/client/notifications'
+      preLoaderRoute: typeof ClientNotificationsRouteImport
       parentRoute: typeof ClientRoute
     }
     '/client/milestones': {
@@ -1185,6 +1204,7 @@ interface ClientRouteChildren {
   ClientLoginRoute: typeof ClientLoginRoute
   ClientMessagesRoute: typeof ClientMessagesRoute
   ClientMilestonesRoute: typeof ClientMilestonesRoute
+  ClientNotificationsRoute: typeof ClientNotificationsRoute
   ClientOrganisationRoute: typeof ClientOrganisationRoute
   ClientProjectsRoute: typeof ClientProjectsRoute
   ClientReportsRoute: typeof ClientReportsRoute
@@ -1204,6 +1224,7 @@ const ClientRouteChildren: ClientRouteChildren = {
   ClientLoginRoute: ClientLoginRoute,
   ClientMessagesRoute: ClientMessagesRoute,
   ClientMilestonesRoute: ClientMilestonesRoute,
+  ClientNotificationsRoute: ClientNotificationsRoute,
   ClientOrganisationRoute: ClientOrganisationRoute,
   ClientProjectsRoute: ClientProjectsRoute,
   ClientReportsRoute: ClientReportsRoute,

@@ -315,6 +315,45 @@ export const SCHEMA_SQL: string[] = [
     internal boolean not null default false,
     created_at timestamptz not null default now()
   )`,
+  // Part C: client<->lead contract messaging. Messages are scoped to a contract
+  // workspace and grouped into threads (thread_key): 'general' is the default
+  // contract-level channel; '<type>:<entity_id>' threads discussion against a
+  // milestone / document / issue / variation / invoice / report / work package.
+  // client_org_id + lead_contractor_id are denormalized (same rationale as the
+  // other portal tables) so the policies grant the linked client org and the
+  // workspace lead access without subquerying contract_workspaces /
+  // contract_clients; the server sets both from the verified workspace-client
+  // link on insert. Messages are immutable (no update/delete policies).
+  `create table if not exists messages (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    thread_key text not null,
+    thread_type text not null default 'general'
+      check (thread_type in ('general','milestone','document','issue','variation','invoice','report','package')),
+    author_user_id uuid not null references users(id) on delete cascade,
+    body text not null,
+    created_at timestamptz not null default now()
+  )`,
+  // Per-participant read watermark per thread: the newest message the user has
+  // seen. Unread = count(messages in thread newer than last_read_at). The
+  // server upserts it on mark-read and when the user posts.
+  `create table if not exists message_reads (
+    workspace_id uuid not null references contract_workspaces(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete set null,
+    lead_contractor_id uuid references users(id) on delete cascade,
+    thread_key text not null,
+    user_id uuid not null references users(id) on delete cascade,
+    last_read_at timestamptz not null default now(),
+    primary key (workspace_id, thread_key, user_id)
+  )`,
+  // Part C (idempotent): client-org scoping on the notification inbox so the
+  // client portal lists/marks only its org's notifications. Rows created by
+  // client-scoped server fns (new-message to the lead) and the demo seed set
+  // it; legacy/lead-side rows keep it null and are matched via the
+  // workspace -> contract_clients link at query time.
+  `alter table notifications add column if not exists client_org_id uuid references client_organizations(id) on delete set null`,
 
   // Delivery tracking shared by both portals. lead_contractor_id / client_org_id
   // are denormalized so policies grant lead/client access without subquerying
@@ -493,6 +532,10 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists contract_workspaces_term_idx on contract_workspaces (end_date)`,
   `create index if not exists audit_logs_client_org_idx on audit_logs (client_org_id)`,
   `create index if not exists notifications_user_id_idx on notifications (user_id, created_at desc)`,
+  `create index if not exists notifications_client_org_idx on notifications (client_org_id)`,
+  `create index if not exists messages_workspace_thread_idx on messages (workspace_id, thread_key, created_at)`,
+  `create index if not exists messages_thread_author_idx on messages (thread_key, author_user_id)`,
+  `create index if not exists message_reads_user_idx on message_reads (user_id)`,
   `create index if not exists audit_logs_workspace_id_idx on audit_logs (workspace_id)`,
   `create index if not exists audit_logs_actor_id_idx on audit_logs (actor_id)`,
   `create index if not exists admin_roles_user_id_idx on admin_roles (user_id)`,
@@ -570,6 +613,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices enable row level security`,
   `alter table progress_reports enable row level security`,
   `alter table documents enable row level security`,
+  `alter table messages enable row level security`,
+  `alter table message_reads enable row level security`,
   `alter table admin_roles force row level security`,
   `alter table client_organizations force row level security`,
   `alter table client_org_members force row level security`,
@@ -582,6 +627,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices force row level security`,
   `alter table progress_reports force row level security`,
   `alter table documents force row level security`,
+  `alter table messages force row level security`,
+  `alter table message_reads force row level security`,
 
   // --- profiles: users manage their own profile; sb_admin manages all ----
   `drop policy if exists profiles_select on profiles`,
@@ -898,6 +945,17 @@ export const SCHEMA_SQL: string[] = [
               and cw.lead_contractor_id = notifications.user_id
           )
       )
+      or exists (
+        -- Part C: a member of a client org linked to the workspace notifying
+        -- that workspace's lead contractor (new-message notifications). The
+        -- link is checked against the NEW row's workspace_id so a member can
+        -- only notify the lead of a contract their org is actually client on.
+        select 1 from contract_clients cc
+        join client_org_members m on m.org_id = cc.client_org_id
+        where cc.contract_workspaces_id = notifications.workspace_id
+          and cc.lead_contractor_id = notifications.user_id
+          and m.user_id = nullif(current_setting('app.user_id', true), '')::uuid
+      )
     )
   )`,
   `drop policy if exists notifications_update on notifications`,
@@ -907,6 +965,40 @@ export const SCHEMA_SQL: string[] = [
   ) with check (
     notifications.user_id = nullif(current_setting('app.user_id', true), '')::uuid
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  // --- messages: client<->lead contract threads. Read/write for the linked
+  // client org (clientMember, acyclic via client_org_members) and the
+  // workspace lead (denormalized lead_contractor_id); sb_admin sees all.
+  // Inserts additionally require the row's client_org_id to be genuinely
+  // linked to its workspace (clientLinked) — RLS is the final gate on top of
+  // the server-side assertClientWorkspace check. Messages are immutable.
+  `drop policy if exists messages_select on messages`,
+  `create policy messages_select on messages for select using (
+    ${IS_ADMIN}
+    or messages.lead_contractor_id = ${UID}
+    or ${clientMember("messages")}
+  )`,
+  `drop policy if exists messages_insert on messages`,
+  `create policy messages_insert on messages for insert with check (
+    ${IS_ADMIN}
+    or messages.lead_contractor_id = ${UID}
+    or (${clientMember("messages")} and ${clientLinked("messages")})
+  )`,
+  // --- message_reads: per-user read watermarks. Only the owning user (or an
+  // admin) sees/updates their own watermark.
+  `drop policy if exists message_reads_select on message_reads`,
+  `create policy message_reads_select on message_reads for select using (
+    message_reads.user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists message_reads_insert on message_reads`,
+  `create policy message_reads_insert on message_reads for insert with check (
+    message_reads.user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists message_reads_update on message_reads`,
+  `create policy message_reads_update on message_reads for update using (
+    message_reads.user_id = ${UID} or ${IS_ADMIN}
+  ) with check (
+    message_reads.user_id = ${UID} or ${IS_ADMIN}
   )`,
 
   // --- audit_logs: any authenticated server call may append; only the

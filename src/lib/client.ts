@@ -17,6 +17,13 @@ import {
   doGetClientProgressReport,
   doGetClientSession,
   doGetClientSettings,
+  doListClientConversations,
+  doListClientMessages,
+  doListClientNotifications,
+  doMarkAllClientNotificationsRead,
+  doMarkClientMessagesRead,
+  doMarkClientNotificationRead,
+  doSendClientMessage,
   doInviteClientMember,
   doListClientContracts,
   doListClientDocuments,
@@ -41,6 +48,7 @@ import type {
   ClientDocumentReviewDecision,
   ClientInvoiceDecision,
   ClientIssueSeverity,
+  ClientMessageThreadType,
   ClientMilestoneReviewDecision,
   ClientOrgMembership,
   ClientSession,
@@ -234,3 +242,39 @@ export const reviewClientInvoice = createServerFn({ method: "POST" })
 export const getClientApprovals = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { orgId: string })
   .handler(({ data }) => doGetClientApprovals(data.orgId));
+
+// ------------------------------------------------------- client portal Part C
+export const listClientConversations = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doListClientConversations(data.orgId));
+export const listClientMessages = createServerFn({ method: "GET" })
+  .validator(
+    (d: unknown) => d as { orgId: string; workspaceId: string; threadKey: string },
+  )
+  .handler(({ data }) => doListClientMessages(data));
+export const sendClientMessage = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        orgId: string;
+        workspaceId: string;
+        threadType: ClientMessageThreadType;
+        threadEntityId?: string | null;
+        body: string;
+      },
+  )
+  .handler(({ data }) => doSendClientMessage(data));
+export const markClientMessagesRead = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { orgId: string; workspaceId: string; threadKey: string },
+  )
+  .handler(({ data }) => doMarkClientMessagesRead(data));
+export const listClientNotifications = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doListClientNotifications(data.orgId));
+export const markClientNotificationRead = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { orgId: string; notificationId: string })
+  .handler(({ data }) => doMarkClientNotificationRead(data));
+export const markAllClientNotificationsRead = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doMarkAllClientNotificationsRead(data.orgId));

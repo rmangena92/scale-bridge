@@ -22,12 +22,14 @@
  */
 import { randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { asService, asUser, dbConfigured, ensureSchema } from "./db";
+import type { Tx, TxQuery } from "./db";
 import { auditQuery } from "./audit";
 import { loadClientUser } from "./auth-core";
 import type {
   ClientApprovals,
   ClientContractDetail,
   ClientContractSummary,
+  ClientConversation,
   ClientDashboardStats,
   ClientDocument,
   ClientDocumentCategory,
@@ -36,19 +38,23 @@ import type {
   ClientInvoiceDecision,
   ClientIssue,
   ClientIssueSeverity,
+  ClientMessage,
+  ClientMessageThreadType,
   ClientMilestone,
   ClientMilestoneReviewDecision,
+  ClientNotification,
   ClientOrgMembership,
   ClientOrgProfile,
   ClientProgressReport,
   ClientRole,
   ClientSession,
   ClientTeamMember,
+  ClientThread,
   ClientVariation,
   ClientVariationDecision,
   Role,
 } from "./types";
-import { CLIENT_ROLES, ROLES } from "./types";
+import { CLIENT_MESSAGE_THREAD_TYPES, CLIENT_NOTIFICATION_TYPES, CLIENT_ROLES, ROLES } from "./types";
 
 // ------------------------------------------------------------- result types
 export type ClientSessionResult = {
@@ -920,13 +926,16 @@ async function assertClientWorkspace(
   role: string,
   orgId: string,
   workspaceId: string,
-): Promise<{ leadContractorId: string } | null> {
+): Promise<{ leadContractorId: string; workspaceTitle: string | null } | null> {
   const rows = (await asUser(userId, role, (tx) => [
-    tx`select cc.lead_contractor_id
+    tx`select cc.lead_contractor_id, cw.title as workspace_title
        from contract_clients cc
+       join contract_workspaces cw on cw.id = cc.contract_workspaces_id
        where cc.contract_workspaces_id = ${workspaceId} and cc.client_org_id = ${orgId}`,
-  ]))[1] as { lead_contractor_id: string }[];
-  return rows[0] ? { leadContractorId: rows[0].lead_contractor_id } : null;
+  ]))[1] as { lead_contractor_id: string; workspace_title: string | null }[];
+  return rows[0]
+    ? { leadContractorId: rows[0].lead_contractor_id, workspaceTitle: rows[0].workspace_title }
+    : null;
 }
 
 // -------------------------------------------------------------- documents
@@ -1752,6 +1761,529 @@ export async function doGetClientApprovals(orgId: string): Promise<ClientResult<
   }
 }
 
+
+// -------------------------------------------------- Part C: messaging + notifications
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MESSAGE_BODY_MAX = 4000;
+function threadKeyOf(
+  type: ClientMessageThreadType,
+  entityId?: string | null,
+): string {
+  return type === "general" ? "general" : `${type}:${entityId ?? ""}`;
+}
+function parseThreadKey(
+  key: string,
+): { type: ClientMessageThreadType; entityId: string | null } {
+  const idx = key.indexOf(":");
+  if (idx === -1) {
+    return {
+      type: (CLIENT_MESSAGE_THREAD_TYPES as readonly string[]).includes(key)
+        ? (key as ClientMessageThreadType)
+        : "general",
+      entityId: null,
+    };
+  }
+  const type = key.slice(0, idx);
+  const id = key.slice(idx + 1);
+  return {
+    type: (CLIENT_MESSAGE_THREAD_TYPES as readonly string[]).includes(type)
+      ? (type as ClientMessageThreadType)
+      : "general",
+    entityId: id || null,
+  };
+}
+/**
+ * Org-scoped notification predicate (bound fragment, so orgId is always a
+ * parameter). Matches rows denormalized to the org (client_org_id) and legacy
+ * rows whose workspace is linked to the org via contract_clients.
+ */
+function notifScope(tx: Tx, orgId: string) {
+  return tx`(
+    n.client_org_id = ${orgId}
+    or (n.client_org_id is null and n.workspace_id is not null and exists (
+      select 1 from contract_clients cc
+      where cc.contract_workspaces_id = n.workspace_id and cc.client_org_id = ${orgId}
+    ))
+  )`;
+}
+export async function doListClientConversations(
+  orgId: string,
+): Promise<ClientResult<ClientConversation[]>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+    const [, wsRows, threadRows, lastRows] = (await asUser(
+      client.user.id,
+      membership.role,
+      (tx) => [
+        tx`select cw.id as workspace_id, cw.title as workspace_title,
+                  u.email as lead_email, p.name as lead_name,
+                  (select c.name from companies c where c.owner_id = cw.lead_contractor_id) as lead_company
+           from contract_clients cc
+           join contract_workspaces cw on cw.id = cc.contract_workspaces_id
+           left join users u on u.id = cw.lead_contractor_id
+           left join profiles p on p.user_id = cw.lead_contractor_id
+           where cc.client_org_id = ${orgId} and cw.status <> 'archived'
+           order by cw.title`,
+        tx`select m.workspace_id, m.thread_key,
+                  count(*) filter (where r.last_read_at is null or m.created_at > r.last_read_at)::int as unread
+           from messages m
+           left join message_reads r
+             on r.workspace_id = m.workspace_id and r.thread_key = m.thread_key
+            and r.user_id = ${client.user.id}
+           where m.client_org_id = ${orgId}
+           group by m.workspace_id, m.thread_key`,
+        tx`select distinct on (m.workspace_id, m.thread_key)
+                  m.workspace_id, m.thread_key, m.body as last_body,
+                  u.email as last_author_email, p.name as last_author_name,
+                  (m.author_user_id = m.lead_contractor_id) as from_lead,
+                  m.created_at as last_at
+           from messages m
+           left join users u on u.id = m.author_user_id
+           left join profiles p on p.user_id = m.author_user_id
+           where m.client_org_id = ${orgId}
+           order by m.workspace_id, m.thread_key, m.created_at desc`,
+      ],
+    )) as unknown as [
+      unknown,
+      {
+        workspace_id: string;
+        workspace_title: string | null;
+        lead_email: string | null;
+        lead_name: string | null;
+        lead_company: string | null;
+      }[],
+      { workspace_id: string; thread_key: string; unread: number }[],
+      {
+        workspace_id: string;
+        thread_key: string;
+        last_body: string;
+        last_author_email: string | null;
+        last_author_name: string | null;
+        from_lead: boolean;
+        last_at: string | Date;
+      }[],
+    ];
+    // Resolve entity display titles for non-general threads.
+    const idsByType = new Map<ClientMessageThreadType, string[]>();
+    for (const t of threadRows) {
+      const { type, entityId } = parseThreadKey(t.thread_key);
+      if (type !== "general" && entityId) {
+        const list = idsByType.get(type) ?? [];
+        list.push(entityId);
+        idsByType.set(type, list);
+      }
+    }
+    const entityTitles = new Map<string, string>();
+    if (idsByType.size > 0) {
+      const entitySelects: ((tx: Tx) => TxQuery)[] = [];
+      for (const [type, ids] of idsByType) {
+        const uniq = [...new Set(ids)];
+        if (type === "milestone")
+          entitySelects.push((tx) => tx`select id, name as title from milestones where id = any(${uniq})`);
+        if (type === "document")
+          entitySelects.push((tx) => tx`select id, name as title from documents where id = any(${uniq})`);
+        if (type === "issue")
+          entitySelects.push((tx) => tx`select id, title from issues where id = any(${uniq})`);
+        if (type === "variation")
+          entitySelects.push((tx) => tx`select id, title from variations where id = any(${uniq})`);
+        if (type === "invoice")
+          entitySelects.push((tx) => tx`select id, invoice_number as title from invoices where id = any(${uniq})`);
+        if (type === "report")
+          entitySelects.push((tx) => tx`select id, title from progress_reports where id = any(${uniq})`);
+        if (type === "package")
+          entitySelects.push((tx) => tx`select id, name as title from work_packages where id = any(${uniq})`);
+      }
+      if (entitySelects.length > 0) {
+        const [, ...res] = (await asUser(client.user.id, membership.role, (tx) =>
+          entitySelects.map((build) => build(tx)),
+        )) as unknown[];
+        for (const r of res) {
+          for (const row of r as { id: string; title: string | null }[]) {
+            if (row.title) entityTitles.set(row.id, row.title);
+          }
+        }
+      }
+    }
+    const lastByKey = new Map(
+      lastRows.map((r) => [`${r.workspace_id}::${r.thread_key}`, r]),
+    );
+    const unreadByKey = new Map(
+      threadRows.map((r) => [`${r.workspace_id}::${r.thread_key}`, r.unread]),
+    );
+    const conversations: ClientConversation[] = [];
+    for (const w of wsRows) {
+      const pushThread = (
+        threadKey: string,
+        type: ClientMessageThreadType,
+        entityId: string | null,
+        unread: number,
+      ) => {
+        const last = lastByKey.get(`${w.workspace_id}::${threadKey}`);
+        conversations.push({
+          workspaceId: w.workspace_id,
+          workspaceTitle: w.workspace_title ?? "Contract",
+          leadName: w.lead_name,
+          leadEmail: w.lead_email,
+          leadCompany: w.lead_company,
+          threadKey,
+          threadType: type,
+          entityId,
+          entityTitle: entityId ? (entityTitles.get(entityId) ?? null) : null,
+          lastBody: last?.last_body ?? null,
+          lastAuthorName: last?.last_author_name ?? null,
+          lastAuthorSide: last ? (last.from_lead ? "lead" : "client") : null,
+          lastMessageAt: last ? String(last.last_at) : null,
+          unread,
+        });
+      };
+      // Default client<->lead channel always present per contract.
+      pushThread("general", "general", null, unreadByKey.get(`${w.workspace_id}::general`) ?? 0);
+      for (const t of threadRows) {
+        if (t.workspace_id !== w.workspace_id || t.thread_key === "general") continue;
+        const { type, entityId } = parseThreadKey(t.thread_key);
+        pushThread(t.thread_key, type, entityId, t.unread);
+      }
+    }
+    conversations.sort((a, b) => {
+      const aAt = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const bAt = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return bAt - aAt || a.workspaceTitle.localeCompare(b.workspaceTitle);
+    });
+    return { ok: true, data: conversations };
+  } catch (e) {
+    console.error("listClientConversations failed:", e);
+    return err("Could not load your conversations.");
+  }
+}
+export async function doListClientMessages(input: {
+  orgId: string;
+  workspaceId: string;
+  threadKey: string;
+}): Promise<ClientResult<ClientThread>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    const link = await assertClientWorkspace(
+      client.user.id,
+      membership.role,
+      input.orgId,
+      input.workspaceId,
+    );
+    if (!link) return err("FORBIDDEN");
+    const { type, entityId } = parseThreadKey(input.threadKey);
+    const queries: ((tx: Tx) => TxQuery)[] = [
+      (tx) => tx`select m.id, m.author_user_id, m.thread_key, m.thread_type, m.body,
+                u.email as author_email, p.name as author_name,
+                (m.author_user_id = m.lead_contractor_id) as from_lead, m.created_at
+         from messages m
+         left join users u on u.id = m.author_user_id
+         left join profiles p on p.user_id = m.author_user_id
+         where m.workspace_id = ${input.workspaceId} and m.thread_key = ${input.threadKey}
+           and m.client_org_id = ${input.orgId}
+         order by m.created_at asc, m.id asc`,
+      (tx) => tx`select last_read_at from message_reads
+         where workspace_id = ${input.workspaceId} and thread_key = ${input.threadKey}
+           and user_id = ${client.user.id}`,
+      (tx) => tx`select cw.title as workspace_title, u.email as lead_email, p.name as lead_name,
+                (select c.name from companies c where c.owner_id = cw.lead_contractor_id) as lead_company
+         from contract_workspaces cw
+         left join users u on u.id = cw.lead_contractor_id
+         left join profiles p on p.user_id = cw.lead_contractor_id
+         where cw.id = ${input.workspaceId}`,
+    ];
+    if (type !== "general" && entityId) {
+      if (type === "milestone")
+        queries.push((tx) => tx`select name as title from milestones where id = ${entityId}`);
+      if (type === "document")
+        queries.push((tx) => tx`select name as title from documents where id = ${entityId}`);
+      if (type === "issue")
+        queries.push((tx) => tx`select title from issues where id = ${entityId}`);
+      if (type === "variation")
+        queries.push((tx) => tx`select title from variations where id = ${entityId}`);
+      if (type === "invoice")
+        queries.push((tx) => tx`select invoice_number as title from invoices where id = ${entityId}`);
+      if (type === "report")
+        queries.push((tx) => tx`select title from progress_reports where id = ${entityId}`);
+      if (type === "package")
+        queries.push((tx) => tx`select name as title from work_packages where id = ${entityId}`);
+    }
+    const [, msgRows, readRows, wsRow, ...entityRows] = (await asUser(
+      client.user.id,
+      membership.role,
+      (tx) => queries.map((build) => build(tx)),
+    )) as unknown[];
+    const lastReadAt = (readRows as { last_read_at: string | Date | null }[])[0]?.last_read_at ?? null;
+    const lastReadMs = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+    const messages: ClientMessage[] = (msgRows as {
+      id: string;
+      author_user_id: string;
+      thread_key: string;
+      thread_type: string;
+      body: string;
+      author_email: string;
+      author_name: string | null;
+      from_lead: boolean;
+      created_at: string | Date;
+    }[]).map((r) => ({
+      id: r.id,
+      workspaceId: input.workspaceId,
+      threadKey: r.thread_key,
+      threadType: (CLIENT_MESSAGE_THREAD_TYPES as readonly string[]).includes(r.thread_type)
+        ? (r.thread_type as ClientMessageThreadType)
+        : "general",
+      body: r.body,
+      authorUserId: r.author_user_id,
+      authorName: r.author_name,
+      authorEmail: r.author_email,
+      authorSide: r.from_lead ? "lead" : "client",
+      createdAt: String(r.created_at),
+      read: lastReadMs > 0 && new Date(r.created_at).getTime() <= lastReadMs,
+    }));
+    const ws = (wsRow as {
+      workspace_title: string | null;
+      lead_email: string | null;
+      lead_name: string | null;
+      lead_company: string | null;
+    }[])[0];
+    const entityTitle = entityRows.length > 0
+      ? String((entityRows[0] as { title: string | null }[])[0]?.title ?? "").trim() || null
+      : null;
+    return {
+      ok: true,
+      data: {
+        workspaceId: input.workspaceId,
+        workspaceTitle: ws?.workspace_title ?? "Contract",
+        leadName: ws?.lead_name ?? null,
+        leadEmail: ws?.lead_email ?? null,
+        leadCompany: ws?.lead_company ?? null,
+        threadKey: input.threadKey,
+        threadType: type,
+        entityId,
+        entityTitle,
+        messages,
+        lastReadAt: lastReadAt ? String(lastReadAt) : null,
+        unread: messages.filter((m) => !m.read).length,
+      },
+    };
+  } catch (e) {
+    console.error("listClientMessages failed:", e);
+    return err("Could not load the conversation.");
+  }
+}
+export async function doSendClientMessage(input: {
+  orgId: string;
+  workspaceId: string;
+  threadType: ClientMessageThreadType;
+  threadEntityId?: string | null;
+  body: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  const body = input.body.trim().slice(0, MESSAGE_BODY_MAX);
+  if (!body) return err("Message cannot be empty.");
+  if (!(CLIENT_MESSAGE_THREAD_TYPES as readonly string[]).includes(input.threadType)) {
+    return err("Invalid thread type.");
+  }
+  let entityId: string | null = input.threadEntityId ?? null;
+  if (input.threadType !== "general") {
+    if (!entityId || !UUID_RE.test(entityId)) return err("Thread entity missing.");
+  } else {
+    entityId = null;
+  }
+  const threadKey = threadKeyOf(input.threadType, entityId);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    const link = await assertClientWorkspace(
+      client.user.id,
+      membership.role,
+      input.orgId,
+      input.workspaceId,
+    );
+    if (!link) return err("FORBIDDEN");
+    const title = link.workspaceTitle ?? "your contract";
+    const linkHref = `/client/messages?org=${input.orgId}&ws=${input.workspaceId}&thread=${threadKey}`;
+    await asUser(client.user.id, membership.role, (tx) => [
+      tx`insert into messages (workspace_id, client_org_id, lead_contractor_id, thread_key, thread_type, author_user_id, body)
+         values (${input.workspaceId}, ${input.orgId}, ${link.leadContractorId}, ${threadKey}, ${input.threadType}, ${client.user.id}, ${body})`,
+      tx`insert into message_reads (workspace_id, client_org_id, lead_contractor_id, thread_key, user_id, last_read_at)
+         values (${input.workspaceId}, ${input.orgId}, ${link.leadContractorId}, ${threadKey}, ${client.user.id}, now())
+         on conflict (workspace_id, thread_key, user_id) do update set last_read_at = now()`,
+      tx`insert into notifications (user_id, workspace_id, client_org_id, type, title, body, link)
+         values (${link.leadContractorId}, ${input.workspaceId}, ${input.orgId}, 'new_message',
+                 ${`New message on ${title}`}, ${body.slice(0, 120)}, ${linkHref})`,
+      auditQuery(tx, client.user.id, "client.message.send", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        threadKey,
+        threadType: input.threadType,
+      }, input.workspaceId, input.orgId),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    console.error("sendClientMessage failed:", e);
+    return err("Could not send the message.");
+  }
+}
+export async function doMarkClientMessagesRead(input: {
+  orgId: string;
+  workspaceId: string;
+  threadKey: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    const link = await assertClientWorkspace(
+      client.user.id,
+      membership.role,
+      input.orgId,
+      input.workspaceId,
+    );
+    if (!link) return err("FORBIDDEN");
+    await asUser(client.user.id, membership.role, (tx) => [
+      tx`insert into message_reads (workspace_id, client_org_id, lead_contractor_id, thread_key, user_id, last_read_at)
+         values (${input.workspaceId}, ${input.orgId}, ${link.leadContractorId}, ${input.threadKey}, ${client.user.id}, now())
+         on conflict (workspace_id, thread_key, user_id) do update set last_read_at = now()`,
+      auditQuery(tx, client.user.id, "client.message.mark_read", {
+        orgId: input.orgId,
+        workspaceId: input.workspaceId,
+        threadKey: input.threadKey,
+      }, input.workspaceId, input.orgId),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    console.error("markClientMessagesRead failed:", e);
+    return err("Could not update read state.");
+  }
+}
+export async function doListClientNotifications(
+  orgId: string,
+): Promise<ClientResult<{ notifications: ClientNotification[]; unreadCount: number }>> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+    const [, rows, counts] = (await asUser(client.user.id, membership.role, (tx) => [
+      tx`select n.id, n.type, n.title, n.body, n.link, n.workspace_id,
+                cw.title as workspace_title, n.read_at, n.created_at
+         from notifications n
+         left join contract_workspaces cw on cw.id = n.workspace_id
+         where n.user_id = ${client.user.id} and ${notifScope(tx, orgId)}
+         order by n.created_at desc limit 100`,
+      tx`select count(*) filter (where read_at is null)::int as unread,
+                count(*)::int as total
+         from notifications n
+         where n.user_id = ${client.user.id} and ${notifScope(tx, orgId)}`,
+    ])) as unknown as [
+      unknown,
+      {
+        id: string;
+        type: string;
+        title: string;
+        body: string | null;
+        link: string | null;
+        workspace_id: string | null;
+        workspace_title: string | null;
+        read_at: string | Date | null;
+        created_at: string | Date;
+      }[],
+      { unread: number; total: number }[],
+    ];
+    const notifications: ClientNotification[] = rows.map((r) => ({
+      id: r.id,
+      type: (CLIENT_NOTIFICATION_TYPES as readonly string[]).includes(r.type)
+        ? (r.type as ClientNotification["type"])
+        : "system",
+      title: r.title,
+      body: r.body,
+      link: r.link,
+      workspaceId: r.workspace_id,
+      workspaceTitle: r.workspace_title,
+      read: r.read_at !== null,
+      createdAt: String(r.created_at),
+    }));
+    return {
+      ok: true,
+      data: {
+        notifications,
+        unreadCount: Number(counts[0]?.unread ?? 0),
+      },
+    };
+  } catch (e) {
+    console.error("listClientNotifications failed:", e);
+    return err("Could not load your notifications.");
+  }
+}
+export async function doMarkClientNotificationRead(input: {
+  orgId: string;
+  notificationId: string;
+}): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, input.orgId);
+    if (!membership) return err("FORBIDDEN");
+    const rows = await asUser(client.user.id, membership.role, (tx) => [
+      tx`update notifications n set read_at = now()
+         where n.id = ${input.notificationId} and n.user_id = ${client.user.id}
+           and ${notifScope(tx, input.orgId)}`,
+      auditQuery(tx, client.user.id, "client.notification.read", {
+        orgId: input.orgId,
+        notificationId: input.notificationId,
+      }, null, input.orgId),
+    ]);
+    if ((rows[1] as { count: number }).count !== 1) return err("Notification not found.");
+    return { ok: true };
+  } catch (e) {
+    console.error("markClientNotificationRead failed:", e);
+    return err("Could not update the notification.");
+  }
+}
+export async function doMarkAllClientNotificationsRead(
+  orgId: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return err("SETUP_REQUIRED", true);
+  try {
+    await ensureSchema();
+    const client = await loadClientUser();
+    if (!client) return err("UNAUTHENTICATED");
+    const membership = await membershipFor(client, orgId);
+    if (!membership) return err("FORBIDDEN");
+    await asUser(client.user.id, membership.role, (tx) => [
+      tx`update notifications n set read_at = now()
+         where n.user_id = ${client.user.id} and n.read_at is null
+           and ${notifScope(tx, orgId)}`,
+      auditQuery(tx, client.user.id, "client.notification.mark_all_read", {
+        orgId,
+      }, null, orgId),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    console.error("markAllClientNotificationsRead failed:", e);
+    return err("Could not update your notifications.");
+  }
+}
 // ------------------------------------------------ shared row mappers (Part B)
 function mapDocumentRow(r: {
   id: string;

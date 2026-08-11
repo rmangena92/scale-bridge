@@ -4,12 +4,13 @@
  * and the route content. Stub sections (Parts B/C — not yet built) render the
  * same shell so the navigation is complete from day one.
  */
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { signOut } from "~/lib/auth";
 import { CLIENT_ROLE_LABELS } from "~/lib/types";
 import type { ClientOrgMembership, ClientSession, ClientRole } from "~/lib/types";
+import { listClientNotifications } from "~/lib/client";
 import { Badge, Button, Logo, Select } from "./ui";
 
 const NAV_ITEMS: { to: string; label: string; built: boolean; part: string }[] = [
@@ -23,8 +24,9 @@ const NAV_ITEMS: { to: string; label: string; built: boolean; part: string }[] =
   { to: "/client/issues", label: "Issues", built: false, part: "B" },
   { to: "/client/variations", label: "Variations", built: false, part: "B" },
   { to: "/client/invoices", label: "Invoices", built: false, part: "B" },
-  { to: "/client/messages", label: "Messages", built: false, part: "C" },
-  { to: "/client/reports", label: "Reports", built: false, part: "B" },
+  { to: "/client/messages", label: "Messages", built: true, part: "C" },
+  { to: "/client/notifications", label: "Notifications", built: true, part: "C" },
+  { to: "/client/reports", label: "Reports", built: true, part: "C" },
   { to: "/client/team", label: "Team", built: true, part: "A" },
   { to: "/client/settings", label: "Settings", built: true, part: "A" },
 ];
@@ -70,6 +72,17 @@ export function ClientShell({
   const { pathname } = useLocation();
   const [signingOut, setSigningOut] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifUnread, setNotifUnread] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await listClientNotifications({ data: { orgId: org.orgId } });
+      if (!cancelled) setNotifUnread(r.ok ? r.data.unreadCount : 0);
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [org.orgId, pathname]);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -126,7 +139,12 @@ export function ClientShell({
                       : "text-white/60 hover:bg-white/5 hover:text-white"
                   }`}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  {item.to === "/client/notifications" && notifUnread > 0 && (
+                    <span className="rounded-full bg-teal px-1.5 py-0.5 text-[10px] font-bold text-navy">
+                      {notifUnread > 9 ? "9+" : notifUnread}
+                    </span>
+                  )}
                   {!item.built && (
                     <span className="rounded-full bg-teal/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-teal">
                       {item.part}

@@ -345,7 +345,7 @@ export type AdminDashboardStats = {
     action: string;
     actorEmail: string | null;
     details: AuditDetails | null;
-    createdAt: string;
+    createdAt: string | null;
   }[];
   expiringLicences: {
     id: string;
@@ -883,7 +883,7 @@ export type ClientDashboardStats = {
     action: string;
     actorEmail: string | null;
     details: AuditDetails | null;
-    createdAt: string;
+    createdAt: string | null;
   }[];
   contractEndDates: {
     id: string;
@@ -991,7 +991,7 @@ export type ClientContractDetail = {
     action: string;
     actorEmail: string | null;
     details: AuditDetails | null;
-    createdAt: string;
+    createdAt: string | null;
   }[];
 };
 

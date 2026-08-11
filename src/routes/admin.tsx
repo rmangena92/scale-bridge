@@ -23,11 +23,6 @@ export const Route = createFileRoute("/admin")({
       throw redirect({ to: "/admin/login" });
     }
   },
-  // Deps keyed on pathname: the layout route is reused when navigating from
-  // /admin/login to /admin, and without a changing dep the loader (and its
-  // freshly-minted session) would NOT re-run, leaving `admin` stale as null
-  // and rendering a blank page after login.
-  loaderDeps: ({ location }) => ({ pathname: location.pathname }),
   loader: async () => {
     const session = await getAdminSession();
     return { admin: session.admin, setupRequired: session.setupRequired };

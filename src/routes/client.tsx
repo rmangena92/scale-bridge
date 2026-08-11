@@ -31,10 +31,7 @@ export const Route = createFileRoute("/client")({
       throw redirect({ to: "/client/login" });
     }
   },
-  loaderDeps: ({ search, location }) => ({
-    org: search.org,
-    pathname: location.pathname,
-  }),
+  loaderDeps: ({ search }) => ({ org: search.org }),
   loader: async ({ deps }) => {
     const session = await getClientSession();
     return {

@@ -37,7 +37,10 @@ function ClientLoginPage() {
     const result = await signIn({ data: { email, password } });
     setPending(false);
     if (result.ok) {
-      await navigate({ to: "/client", search: { org: undefined } });
+      // Hard redirect: a fresh SSR load guarantees the /client layout loader
+      // runs with the new session cookie. Client-side navigation reuses the
+      // layout's stale loader data (client: null) and renders a blank page.
+      window.location.assign("/client");
       return;
     }
     if (result.setupRequired) {

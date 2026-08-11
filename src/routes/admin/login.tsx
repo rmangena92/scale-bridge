@@ -37,7 +37,10 @@ function AdminLoginPage() {
     const result = await signIn({ data: { email, password } });
     setPending(false);
     if (result.ok) {
-      await navigate({ to: "/admin" });
+      // Hard redirect: a fresh SSR load guarantees the /admin layout loader
+      // runs with the new session cookie. Client-side navigation reuses the
+      // layout's stale loader data (admin: null) and renders a blank page.
+      window.location.assign("/admin");
       return;
     }
     if (result.setupRequired) {

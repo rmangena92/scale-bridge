@@ -321,30 +321,17 @@ function CheckIcon({ className = "mt-0.5 size-5 shrink-0 text-teal" }: { classNa
 function SiteNav() {
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur">
-      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-5 sm:px-8">
-        <a href="/" aria-label="ScaleBridge home">
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center px-5 sm:px-8">
+        <a href="/" aria-label="ScaleBridge home" className="shrink-0">
           <Logo />
         </a>
-        <nav className="hidden items-center gap-5 text-sm font-semibold text-muted xl:flex">
+        <nav className="ml-10 hidden flex-1 items-center gap-6 text-sm font-semibold text-muted xl:flex">
           {NAV_LINKS.map((link) => (
             <a key={link.label} href={link.href} className="whitespace-nowrap hover:text-brand">
               {link.label}
             </a>
           ))}
         </nav>
-        <div className="flex items-center gap-3">
-          <ButtonLink to="/signup" variant="primary" size="sm">
-            Build Your Partner Profile
-          </ButtonLink>
-          <ButtonLink
-            to="/login"
-            variant="ghost"
-            size="sm"
-            className="hidden border border-slate-200 bg-white sm:inline-flex"
-          >
-            Create a Partnership Workspace
-          </ButtonLink>
-        </div>
       </div>
     </header>
   );

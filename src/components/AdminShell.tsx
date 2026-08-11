@@ -1,8 +1,9 @@
 /**
- * AdminShell — the ScaleBridge Admin Portal frame: dark sidebar with the
- * spec's admin navigation, a top bar with the signed-in staff member, and the
- * route content. Stub sections (not yet built) render the same shell so the
- * navigation is complete from day one.
+ * AdminShell — the ScaleBridge Master Admin Portal frame: dark sidebar with the
+ * owner-specified 16-section navigation, a top bar with the signed-in staff
+ * member, and the route content. Sections whose data lands in later build items
+ * (services catalogue, AI layers) render honest empty states inside their own
+ * pages — the shell never fabricates records.
  */
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -12,22 +13,23 @@ import { ADMIN_ROLE_LABELS } from "~/lib/types";
 import type { AdminSession } from "~/lib/types";
 import { Badge, Button, Logo } from "./ui";
 
-const NAV_ITEMS: { to: string; label: string; built: boolean }[] = [
-  { to: "/admin", label: "Admin Dashboard", built: true },
-  { to: "/admin/users", label: "Users", built: true },
-  { to: "/admin/companies", label: "Companies", built: true },
-  { to: "/admin/verification", label: "Verification", built: true },
-  { to: "/admin/contracts", label: "Contracts", built: true },
-  { to: "/admin/projects", label: "Projects", built: false },
-  { to: "/admin/documents", label: "Documents", built: true },
-  { to: "/admin/messages", label: "Messages", built: false },
-  { to: "/admin/support", label: "Support", built: true },
-  { to: "/admin/disputes", label: "Disputes", built: false },
-  { to: "/admin/payments", label: "Payments", built: false },
-  { to: "/admin/subscriptions", label: "Subscriptions", built: false },
-  { to: "/admin/reports", label: "Reports", built: false },
-  { to: "/admin/audit-log", label: "Audit Log", built: true },
-  { to: "/admin/settings", label: "Platform Settings", built: true },
+export const ADMIN_NAV: { to: string; label: string }[] = [
+  { to: "/admin", label: "Master Dashboard" },
+  { to: "/admin/companies", label: "Companies" },
+  { to: "/admin/services", label: "Services" },
+  { to: "/admin/contracts", label: "Contracts" },
+  { to: "/admin/opportunities", label: "Opportunities" },
+  { to: "/admin/verification", label: "Verification" },
+  { to: "/admin/documents", label: "Documents" },
+  { to: "/admin/ai-insights", label: "AI Insights" },
+  { to: "/admin/upsells", label: "Upsell Opportunities" },
+  { to: "/admin/users", label: "Users" },
+  { to: "/admin/support", label: "Support" },
+  { to: "/admin/disputes", label: "Disputes" },
+  { to: "/admin/finance", label: "Finance" },
+  { to: "/admin/reports", label: "Reports" },
+  { to: "/admin/audit-log", label: "Audit Log" },
+  { to: "/admin/settings", label: "Settings" },
 ];
 
 function isActive(pathname: string, to: string): boolean {
@@ -62,13 +64,13 @@ export function AdminShell({
         <div className="leading-tight">
           <p className="text-sm font-bold">ScaleBridge</p>
           <p className="text-[11px] font-semibold uppercase tracking-widest text-teal">
-            Admin Portal
+            Master Admin
           </p>
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <ul className="flex flex-col gap-0.5">
-          {NAV_ITEMS.map((item) => {
+          {ADMIN_NAV.map((item) => {
             const active = isActive(pathname, item.to);
             return (
               <li key={item.to}>
@@ -82,11 +84,6 @@ export function AdminShell({
                   }`}
                 >
                   {item.label}
-                  {!item.built && (
-                    <span className="rounded-full bg-teal/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-teal">
-                      B
-                    </span>
-                  )}
                 </Link>
               </li>
             );
@@ -133,7 +130,7 @@ export function AdminShell({
               ☰
             </button>
             <p className="text-sm font-bold uppercase tracking-widest text-teal">
-              ScaleBridge Admin
+              ScaleBridge Master Admin
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -156,7 +153,7 @@ export function AdminShell({
   );
 }
 
-/** Friendly placeholder for the Admin Portal sections shipping in Part B. */
+/** Friendly placeholder for Master Admin sections that land in later builds. */
 export function ComingSoon({
   title,
   blurb,
@@ -169,7 +166,7 @@ export function ComingSoon({
       <p className="text-sm font-bold uppercase tracking-widest text-teal">
         {title}
       </p>
-      <h1 className="mt-1 text-2xl font-bold">Coming in Part B</h1>
+      <h1 className="mt-1 text-2xl font-bold">Coming in a later build step</h1>
       <p className="mt-2 max-w-xl text-sm text-muted">{blurb}</p>
     </div>
   );

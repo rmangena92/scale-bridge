@@ -37,19 +37,20 @@ import { Route as ClientDocumentsRouteImport } from './routes/client/documents'
 import { Route as ClientApprovalsRouteImport } from './routes/client/approvals'
 import { Route as AdminVerificationRouteImport } from './routes/admin/verification'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
+import { Route as AdminUpsellsRouteImport } from './routes/admin/upsells'
 import { Route as AdminSupportRouteImport } from './routes/admin/support'
-import { Route as AdminSubscriptionsRouteImport } from './routes/admin/subscriptions'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
+import { Route as AdminServicesRouteImport } from './routes/admin/services'
 import { Route as AdminReportsRouteImport } from './routes/admin/reports'
-import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
-import { Route as AdminPaymentsRouteImport } from './routes/admin/payments'
-import { Route as AdminMessagesRouteImport } from './routes/admin/messages'
+import { Route as AdminOpportunitiesRouteImport } from './routes/admin/opportunities'
 import { Route as AdminLoginRouteImport } from './routes/admin/login'
+import { Route as AdminFinanceRouteImport } from './routes/admin/finance'
 import { Route as AdminDocumentsRouteImport } from './routes/admin/documents'
 import { Route as AdminDisputesRouteImport } from './routes/admin/disputes'
 import { Route as AdminContractsRouteImport } from './routes/admin/contracts'
 import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
 import { Route as AdminAuditLogRouteImport } from './routes/admin/audit-log'
+import { Route as AdminAiInsightsRouteImport } from './routes/admin/ai-insights'
 import { Route as ClientContractsIndexRouteImport } from './routes/client/contracts/index'
 import { Route as AdminVerificationIndexRouteImport } from './routes/admin/verification/index'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin/users/index'
@@ -205,14 +206,14 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminUpsellsRoute = AdminUpsellsRouteImport.update({
+  id: '/upsells',
+  path: '/upsells',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminSupportRoute = AdminSupportRouteImport.update({
   id: '/support',
   path: '/support',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminSubscriptionsRoute = AdminSubscriptionsRouteImport.update({
-  id: '/subscriptions',
-  path: '/subscriptions',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
@@ -220,29 +221,29 @@ const AdminSettingsRoute = AdminSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminServicesRoute = AdminServicesRouteImport.update({
+  id: '/services',
+  path: '/services',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminReportsRoute = AdminReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminProjectsRoute = AdminProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminPaymentsRoute = AdminPaymentsRouteImport.update({
-  id: '/payments',
-  path: '/payments',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminMessagesRoute = AdminMessagesRouteImport.update({
-  id: '/messages',
-  path: '/messages',
+const AdminOpportunitiesRoute = AdminOpportunitiesRouteImport.update({
+  id: '/opportunities',
+  path: '/opportunities',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminFinanceRoute = AdminFinanceRouteImport.update({
+  id: '/finance',
+  path: '/finance',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminDocumentsRoute = AdminDocumentsRouteImport.update({
@@ -268,6 +269,11 @@ const AdminCompaniesRoute = AdminCompaniesRouteImport.update({
 const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
   id: '/audit-log',
   path: '/audit-log',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAiInsightsRoute = AdminAiInsightsRouteImport.update({
+  id: '/ai-insights',
+  path: '/ai-insights',
   getParentRoute: () => AdminRoute,
 } as any)
 const ClientContractsIndexRoute = ClientContractsIndexRouteImport.update({
@@ -353,19 +359,20 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/companies': typeof AdminCompaniesRouteWithChildren
   '/admin/contracts': typeof AdminContractsRouteWithChildren
   '/admin/disputes': typeof AdminDisputesRoute
   '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/finance': typeof AdminFinanceRoute
   '/admin/login': typeof AdminLoginRoute
-  '/admin/messages': typeof AdminMessagesRoute
-  '/admin/payments': typeof AdminPaymentsRoute
-  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/opportunities': typeof AdminOpportunitiesRoute
   '/admin/reports': typeof AdminReportsRoute
+  '/admin/services': typeof AdminServicesRoute
   '/admin/settings': typeof AdminSettingsRouteWithChildren
-  '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/support': typeof AdminSupportRouteWithChildren
+  '/admin/upsells': typeof AdminUpsellsRoute
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
   '/client/approvals': typeof ClientApprovalsRoute
@@ -407,15 +414,16 @@ export interface FileRoutesByTo {
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/disputes': typeof AdminDisputesRoute
   '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/finance': typeof AdminFinanceRoute
   '/admin/login': typeof AdminLoginRoute
-  '/admin/messages': typeof AdminMessagesRoute
-  '/admin/payments': typeof AdminPaymentsRoute
-  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/opportunities': typeof AdminOpportunitiesRoute
   '/admin/reports': typeof AdminReportsRoute
-  '/admin/subscriptions': typeof AdminSubscriptionsRoute
+  '/admin/services': typeof AdminServicesRoute
+  '/admin/upsells': typeof AdminUpsellsRoute
   '/client/approvals': typeof ClientApprovalsRoute
   '/client/documents': typeof ClientDocumentsRoute
   '/client/invoices': typeof ClientInvoicesRoute
@@ -459,19 +467,20 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/companies': typeof AdminCompaniesRouteWithChildren
   '/admin/contracts': typeof AdminContractsRouteWithChildren
   '/admin/disputes': typeof AdminDisputesRoute
   '/admin/documents': typeof AdminDocumentsRoute
+  '/admin/finance': typeof AdminFinanceRoute
   '/admin/login': typeof AdminLoginRoute
-  '/admin/messages': typeof AdminMessagesRoute
-  '/admin/payments': typeof AdminPaymentsRoute
-  '/admin/projects': typeof AdminProjectsRoute
+  '/admin/opportunities': typeof AdminOpportunitiesRoute
   '/admin/reports': typeof AdminReportsRoute
+  '/admin/services': typeof AdminServicesRoute
   '/admin/settings': typeof AdminSettingsRouteWithChildren
-  '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/support': typeof AdminSupportRouteWithChildren
+  '/admin/upsells': typeof AdminUpsellsRoute
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
   '/client/approvals': typeof ClientApprovalsRoute
@@ -518,19 +527,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/admin/ai-insights'
     | '/admin/audit-log'
     | '/admin/companies'
     | '/admin/contracts'
     | '/admin/disputes'
     | '/admin/documents'
+    | '/admin/finance'
     | '/admin/login'
-    | '/admin/messages'
-    | '/admin/payments'
-    | '/admin/projects'
+    | '/admin/opportunities'
     | '/admin/reports'
+    | '/admin/services'
     | '/admin/settings'
-    | '/admin/subscriptions'
     | '/admin/support'
+    | '/admin/upsells'
     | '/admin/users'
     | '/admin/verification'
     | '/client/approvals'
@@ -572,15 +582,16 @@ export interface FileRouteTypes {
     | '/invitations'
     | '/login'
     | '/signup'
+    | '/admin/ai-insights'
     | '/admin/audit-log'
     | '/admin/disputes'
     | '/admin/documents'
+    | '/admin/finance'
     | '/admin/login'
-    | '/admin/messages'
-    | '/admin/payments'
-    | '/admin/projects'
+    | '/admin/opportunities'
     | '/admin/reports'
-    | '/admin/subscriptions'
+    | '/admin/services'
+    | '/admin/upsells'
     | '/client/approvals'
     | '/client/documents'
     | '/client/invoices'
@@ -623,19 +634,20 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/admin/ai-insights'
     | '/admin/audit-log'
     | '/admin/companies'
     | '/admin/contracts'
     | '/admin/disputes'
     | '/admin/documents'
+    | '/admin/finance'
     | '/admin/login'
-    | '/admin/messages'
-    | '/admin/payments'
-    | '/admin/projects'
+    | '/admin/opportunities'
     | '/admin/reports'
+    | '/admin/services'
     | '/admin/settings'
-    | '/admin/subscriptions'
     | '/admin/support'
+    | '/admin/upsells'
     | '/admin/users'
     | '/admin/verification'
     | '/client/approvals'
@@ -881,18 +893,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/upsells': {
+      id: '/admin/upsells'
+      path: '/upsells'
+      fullPath: '/admin/upsells'
+      preLoaderRoute: typeof AdminUpsellsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/support': {
       id: '/admin/support'
       path: '/support'
       fullPath: '/admin/support'
       preLoaderRoute: typeof AdminSupportRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/subscriptions': {
-      id: '/admin/subscriptions'
-      path: '/subscriptions'
-      fullPath: '/admin/subscriptions'
-      preLoaderRoute: typeof AdminSubscriptionsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/settings': {
@@ -902,6 +914,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/services': {
+      id: '/admin/services'
+      path: '/services'
+      fullPath: '/admin/services'
+      preLoaderRoute: typeof AdminServicesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/reports': {
       id: '/admin/reports'
       path: '/reports'
@@ -909,25 +928,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/projects': {
-      id: '/admin/projects'
-      path: '/projects'
-      fullPath: '/admin/projects'
-      preLoaderRoute: typeof AdminProjectsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/payments': {
-      id: '/admin/payments'
-      path: '/payments'
-      fullPath: '/admin/payments'
-      preLoaderRoute: typeof AdminPaymentsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/messages': {
-      id: '/admin/messages'
-      path: '/messages'
-      fullPath: '/admin/messages'
-      preLoaderRoute: typeof AdminMessagesRouteImport
+    '/admin/opportunities': {
+      id: '/admin/opportunities'
+      path: '/opportunities'
+      fullPath: '/admin/opportunities'
+      preLoaderRoute: typeof AdminOpportunitiesRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/login': {
@@ -935,6 +940,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/admin/login'
       preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/finance': {
+      id: '/admin/finance'
+      path: '/finance'
+      fullPath: '/admin/finance'
+      preLoaderRoute: typeof AdminFinanceRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/documents': {
@@ -970,6 +982,13 @@ declare module '@tanstack/react-router' {
       path: '/audit-log'
       fullPath: '/admin/audit-log'
       preLoaderRoute: typeof AdminAuditLogRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/ai-insights': {
+      id: '/admin/ai-insights'
+      path: '/ai-insights'
+      fullPath: '/admin/ai-insights'
+      preLoaderRoute: typeof AdminAiInsightsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/client/contracts/': {
@@ -1157,38 +1176,40 @@ const AdminVerificationRouteWithChildren =
   AdminVerificationRoute._addFileChildren(AdminVerificationRouteChildren)
 
 interface AdminRouteChildren {
+  AdminAiInsightsRoute: typeof AdminAiInsightsRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminCompaniesRoute: typeof AdminCompaniesRouteWithChildren
   AdminContractsRoute: typeof AdminContractsRouteWithChildren
   AdminDisputesRoute: typeof AdminDisputesRoute
   AdminDocumentsRoute: typeof AdminDocumentsRoute
+  AdminFinanceRoute: typeof AdminFinanceRoute
   AdminLoginRoute: typeof AdminLoginRoute
-  AdminMessagesRoute: typeof AdminMessagesRoute
-  AdminPaymentsRoute: typeof AdminPaymentsRoute
-  AdminProjectsRoute: typeof AdminProjectsRoute
+  AdminOpportunitiesRoute: typeof AdminOpportunitiesRoute
   AdminReportsRoute: typeof AdminReportsRoute
+  AdminServicesRoute: typeof AdminServicesRoute
   AdminSettingsRoute: typeof AdminSettingsRouteWithChildren
-  AdminSubscriptionsRoute: typeof AdminSubscriptionsRoute
   AdminSupportRoute: typeof AdminSupportRouteWithChildren
+  AdminUpsellsRoute: typeof AdminUpsellsRoute
   AdminUsersRoute: typeof AdminUsersRouteWithChildren
   AdminVerificationRoute: typeof AdminVerificationRouteWithChildren
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAiInsightsRoute: AdminAiInsightsRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminCompaniesRoute: AdminCompaniesRouteWithChildren,
   AdminContractsRoute: AdminContractsRouteWithChildren,
   AdminDisputesRoute: AdminDisputesRoute,
   AdminDocumentsRoute: AdminDocumentsRoute,
+  AdminFinanceRoute: AdminFinanceRoute,
   AdminLoginRoute: AdminLoginRoute,
-  AdminMessagesRoute: AdminMessagesRoute,
-  AdminPaymentsRoute: AdminPaymentsRoute,
-  AdminProjectsRoute: AdminProjectsRoute,
+  AdminOpportunitiesRoute: AdminOpportunitiesRoute,
   AdminReportsRoute: AdminReportsRoute,
+  AdminServicesRoute: AdminServicesRoute,
   AdminSettingsRoute: AdminSettingsRouteWithChildren,
-  AdminSubscriptionsRoute: AdminSubscriptionsRoute,
   AdminSupportRoute: AdminSupportRouteWithChildren,
+  AdminUpsellsRoute: AdminUpsellsRoute,
   AdminUsersRoute: AdminUsersRouteWithChildren,
   AdminVerificationRoute: AdminVerificationRouteWithChildren,
   AdminIndexRoute: AdminIndexRoute,

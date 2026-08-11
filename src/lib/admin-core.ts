@@ -81,7 +81,12 @@ export type UserDetailResult =
   | { ok: false; error: string; setupRequired?: boolean };
 
 export type CompaniesResult =
-  | { ok: true; companies: AdminCompanySummary[]; total: number }
+  | {
+      ok: true;
+      companies: AdminCompanySummary[];
+      total: number;
+      industries: string[];
+    }
   | { ok: false; error: string; setupRequired?: boolean };
 
 export type CompanyDetailResult =
@@ -112,6 +117,8 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
       tx`select count(*)::int as n from users`,
       tx`select count(*)::int as n from companies`,
       tx`select count(*)::int as n from companies
+         where verification_status = 'verified'`,
+      tx`select count(*)::int as n from companies
          where verification_status in ('pending','documents_pending','under_review')`,
       tx`select count(*)::int as n from contract_workspaces where status = 'active'`,
       tx`select count(*)::int as n from contract_workspaces cw
@@ -126,6 +133,9 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
       tx`select count(*)::int as n from documents where review_status = 'pending'`,
       tx`select coalesce(sum(amount), 0)::numeric as total from invoices
          where status in ('submitted','under_review','approved','scheduled_for_payment','overdue')`,
+      tx`select count(*)::int as n from documents
+         where expiry_date is not null
+           and expiry_date between (now()::date) and (now()::date + interval '90 days')`,
       tx`select a.id, a.action, a.details, a.created_at,
                 u.email as actor_email
          from audit_logs a
@@ -144,16 +154,18 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
          limit 20`,
     ]);
     // asUser() returns [set_config_rows, ...query_rows] — real results start at [1].
-    const n = (i: number) => Number((rows[i + 1] as { n: number }[] | undefined)?.[0]?.n ?? 0); // asUser returns [set_config, ...queries]
+    // n(q) reads the q-th query's rows (rows[q + 1]); q indexes the batch above.
+    const n = (q: number) =>
+      Number((rows[q + 1] as { n: number }[] | undefined)?.[0]?.n ?? 0);
     const payments = rows[10] as { total: string }[];
-    const activity = rows[11] as {
+    const activity = rows[12] as {
       id: string;
       action: string;
       details: unknown;
       created_at: string;
       actor_email: string | null;
     }[];
-    const licences = rows[12] as {
+    const licences = rows[13] as {
       id: string;
       name: string;
       category: string | null;
@@ -164,8 +176,9 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
     return {
       ok: true,
       stats: {
-        totalUsers: n(1),
-        totalCompanies: n(2),
+        totalUsers: n(0),
+        totalCompanies: n(1),
+        companiesVerified: n(2),
         companiesAwaitingVerification: n(3),
         activeContracts: n(4),
         contractsAwaitingResponses: n(5),
@@ -175,6 +188,12 @@ export async function doGetAdminDashboard(): Promise<DashboardResult> {
         pendingDocumentReviews: n(9),
         outstandingPayments: Number(payments[0]?.total ?? 0),
         monthlyRecurringRevenue: 0, // subscriptions ship in Part B
+        // Catalogue/AI surfaces: no tables exist yet — honest zeros, the UI
+        // shows the 'available after services catalogue build' note.
+        servicesListed: 0,
+        opportunitiesOpen: 0,
+        aiDiscoveries: 0,
+        upsellRecommendations: 0,
         recentActivity: activity.map((r) => ({
           id: r.id,
           action: r.action,
@@ -532,10 +551,21 @@ export async function doSetAdminRoles(
 export async function doListCompanies(input: {
   query: string;
   status: string;
+  industry: string;
+  activeStatus: string;
+  participation: string;
 }): Promise<CompaniesResult> {
   if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
   const q = (input.query ?? "").trim();
   const status = COMPANY_STATUSES.includes(input.status as never) ? input.status : "";
+  const industry = (input.industry ?? "").trim().slice(0, 100);
+  const activeStatus =
+    input.activeStatus === "active" || input.activeStatus === "inactive"
+      ? input.activeStatus
+      : "";
+  const participation = ["none", "any", "active"].includes(input.participation ?? "")
+    ? input.participation
+    : "";
   try {
     await ensureSchema();
     const admin = await loadAdminUser();
@@ -544,13 +574,46 @@ export async function doListCompanies(input: {
     const pattern = `%${q}%`;
     const rows = await asUser(admin.user.id, admin.user.role, (tx) => [
       tx`select c.id, c.name, c.type, c.verification_status, c.created_at,
-                c.owner_id, u.email as owner_email
+                c.owner_id, u.email as owner_email,
+                (select count(*)::int from contract_workspaces cw
+                  where cw.lead_contractor_id = c.owner_id
+                     or exists (select 1 from invitations i
+                                where i.workspace_id = cw.id and i.company_id = c.id)) as contracts_count,
+                (select count(*)::int from contract_workspaces cw
+                  where cw.status = 'active'
+                    and (cw.lead_contractor_id = c.owner_id
+                         or exists (select 1 from invitations i
+                                    where i.workspace_id = cw.id and i.company_id = c.id))) as active_contracts_count
          from companies c
          left join users u on u.id = c.owner_id
          where (${q} = '' or c.name ilike ${pattern} or coalesce(u.email, '') ilike ${pattern})
            and (${status} = '' or c.verification_status = ${status})
+           and (${industry} = '' or coalesce(c.type, '') = ${industry})
+           and (${activeStatus} = ''
+                or (${activeStatus} = 'active' and c.verification_status not in ('suspended','rejected','archived'))
+                or (${activeStatus} = 'inactive' and c.verification_status in ('suspended','rejected','archived')))
+           and (${participation} = ''
+                or (${participation} = 'none' and not exists (
+                      select 1 from contract_workspaces cw2
+                      where cw2.lead_contractor_id = c.owner_id
+                         or exists (select 1 from invitations i2
+                                    where i2.workspace_id = cw2.id and i2.company_id = c.id)))
+                or (${participation} = 'any' and exists (
+                      select 1 from contract_workspaces cw3
+                      where cw3.lead_contractor_id = c.owner_id
+                         or exists (select 1 from invitations i3
+                                    where i3.workspace_id = cw3.id and i3.company_id = c.id)))
+                or (${participation} = 'active' and exists (
+                      select 1 from contract_workspaces cw4
+                      where cw4.status = 'active'
+                        and (cw4.lead_contractor_id = c.owner_id
+                             or exists (select 1 from invitations i4
+                                        where i4.workspace_id = cw4.id and i4.company_id = c.id)))))
          order by c.created_at desc
          limit 200`,
+      tx`select distinct type from companies
+         where type is not null and type <> ''
+         order by type`,
     ]);
     const list = rows[1] as unknown[];
     const companies: AdminCompanySummary[] = (list as {
@@ -561,6 +624,8 @@ export async function doListCompanies(input: {
       created_at: string;
       owner_id: string;
       owner_email: string | null;
+      contracts_count: number;
+      active_contracts_count: number;
     }[]).map((r) => ({
       id: r.id,
       name: r.name,
@@ -569,8 +634,13 @@ export async function doListCompanies(input: {
       ownerId: r.owner_id,
       ownerEmail: r.owner_email,
       createdAt: String(r.created_at),
+      contractsCount: r.contracts_count ?? 0,
+      activeContractsCount: r.active_contracts_count ?? 0,
+      location: null, // companies has no location column yet (catalogue build)
+      aiOpportunityScore: 0, // AI opportunity scoring lands with the catalogue
     }));
-    return { ok: true, companies, total: companies.length };
+    const industries = (rows[2] as { type: string }[]).map((r) => r.type);
+    return { ok: true, companies, total: companies.length, industries };
   } catch (err) {
     console.error("listCompanies failed:", err);
     return { ok: false, error: "Could not load companies." };
@@ -616,6 +686,33 @@ export async function doGetCompanyDetail(
             )
          order by cw.created_at desc
          limit 100`,
+      tx`select cn.id, cn.company_id, cn.author_user_id, cn.body, cn.created_at, cn.updated_at,
+                u.email as author_email, p.name as author_name
+         from company_notes cn
+         left join users u on u.id = cn.author_user_id
+         left join profiles p on p.user_id = u.id
+         where cn.company_id = ${companyId}
+         order by cn.created_at desc
+         limit 200`,
+      tx`select a.id, a.action, a.details, a.created_at, u.email as actor_email
+         from audit_logs a
+         left join users u on u.id = a.actor_id
+         where a.details ->> 'companyId' = ${companyId}
+            or a.workspace_id in (
+              select cw.id from contract_workspaces cw
+              where cw.lead_contractor_id = (select owner_id from companies where id = ${companyId})
+                 or exists (select 1 from invitations i
+                            where i.workspace_id = cw.id and i.company_id = ${companyId})
+            )
+         order by a.created_at desc
+         limit 50`,
+      tx`select a.id, a.action, a.details, a.created_at, u.email as actor_email
+         from audit_logs a
+         left join users u on u.id = a.actor_id
+         where a.details ->> 'companyId' = ${companyId}
+           and a.action like 'admin.company.%'
+         order by a.created_at desc
+         limit 50`,
     ]);
     const companyRows = rows[1] as unknown[];
     const companyRow = companyRows[0] as {
@@ -654,6 +751,47 @@ export async function doGetCompanyDetail(
       status: AdminCompanyDetail["contracts"][number]["status"];
       created_at: string;
     }[];
+    const noteRows = rows[5] as {
+      id: string;
+      company_id: string;
+      author_user_id: string | null;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      author_email: string | null;
+      author_name: string | null;
+    }[];
+    const activityRows = rows[6] as {
+      id: string;
+      action: string;
+      details: unknown;
+      created_at: string;
+      actor_email: string | null;
+    }[];
+    const verificationRows = rows[7] as {
+      id: string;
+      action: string;
+      details: unknown;
+      created_at: string;
+      actor_email: string | null;
+    }[];
+
+    const mapAudit = (r: {
+      id: string;
+      action: string;
+      details: unknown;
+      created_at: string;
+      actor_email: string | null;
+    }): AdminCompanyDetail["activity"][number] => ({
+      id: r.id,
+      action: r.action,
+      actorEmail: r.actor_email,
+      details:
+        typeof r.details === "string"
+          ? (JSON.parse(r.details) as AuditDetails)
+          : ((r.details as AuditDetails | null) ?? null),
+      createdAt: String(r.created_at),
+    });
 
     return {
       ok: true,
@@ -691,6 +829,18 @@ export async function doGetCompanyDetail(
           title: r.title,
           status: r.status,
           createdAt: String(r.created_at),
+        })),
+        verificationHistory: verificationRows.map(mapAudit),
+        activity: activityRows.map(mapAudit),
+        notes: noteRows.map((r) => ({
+          id: r.id,
+          companyId: r.company_id,
+          authorUserId: r.author_user_id,
+          authorEmail: r.author_email,
+          authorName: r.author_name,
+          body: r.body,
+          createdAt: String(r.created_at),
+          updatedAt: String(r.updated_at),
         })),
       },
     };
@@ -776,6 +926,184 @@ export async function doAddCompanyNote(
   } catch (err) {
     console.error("addCompanyNote failed:", err);
     return { ok: false, error: "Could not save the note." };
+  }
+}
+
+// -------------------------------------------------- company notes (Master)
+// company_notes: per-note internal notes (author + timestamps, audit-logged).
+// Supersedes the legacy companies.internal_notes text[] append flow for new
+// notes; the legacy field/function remain for compatibility.
+export async function doCreateCompanyNote(
+  companyId: string,
+  body: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const clean = body.trim().slice(0, 2000);
+  if (!clean) return { ok: false, error: "Note cannot be empty." };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+    if (!admin.canMutate) return { ok: false, error: "FORBIDDEN_READ_ONLY" };
+
+    const rows = (await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select id from companies where id = ${companyId}`,
+    ]))[1] as { id: string }[];
+    if (!rows[0]) return { ok: false, error: "Company not found." };
+
+    await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`insert into company_notes (company_id, author_user_id, body)
+         values (${companyId}, ${admin.user.id}, ${clean})`,
+      auditQuery(tx, admin.user.id, "admin.company.note", {
+        companyId,
+        action: "create",
+        note: clean,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("createCompanyNote failed:", err);
+    return { ok: false, error: "Could not save the note." };
+  }
+}
+
+export async function doUpdateCompanyNote(
+  noteId: string,
+  body: string,
+): Promise<SimpleResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  const clean = body.trim().slice(0, 2000);
+  if (!clean) return { ok: false, error: "Note cannot be empty." };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+    if (!admin.canMutate) return { ok: false, error: "FORBIDDEN_READ_ONLY" };
+
+    const rows = (await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select id, company_id from company_notes where id = ${noteId}`,
+    ]))[1] as { id: string; company_id: string }[];
+    if (!rows[0]) return { ok: false, error: "Note not found." };
+
+    await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`update company_notes set body = ${clean}, updated_at = now() where id = ${noteId}`,
+      auditQuery(tx, admin.user.id, "admin.company.note.edit", {
+        companyId: rows[0].company_id,
+        noteId,
+        note: clean,
+      }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    console.error("updateCompanyNote failed:", err);
+    return { ok: false, error: "Could not update the note." };
+  }
+}
+
+// ------------------------------------------------------------ finance (Master)
+export type FinanceSummaryResult =
+  | {
+      ok: true;
+      summary: {
+        invoiceCount: number;
+        outstandingTotalCents: number;
+        paidTotalCents: number;
+        byStatus: { status: string; count: number; totalCents: number }[];
+      };
+    }
+  | { ok: false; error: string; setupRequired?: boolean };
+
+export async function doGetFinanceSummary(): Promise<FinanceSummaryResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const rows = await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select status, count(*)::int as n,
+                coalesce(sum(coalesce(amount_cents, 0)), 0)::bigint as cents
+         from invoices
+         group by status order by status`,
+      tx`select
+           coalesce(sum(case when status not in ('paid','cancelled','rejected') then coalesce(amount_cents, 0) else 0 end), 0)::bigint as outstanding,
+           coalesce(sum(case when status = 'paid' then coalesce(amount_cents, 0) else 0 end), 0)::bigint as paid,
+           count(*)::int as invoice_count
+         from invoices`,
+    ]);
+    const byStatus = (rows[1] as { status: string; n: number; cents: number }[]).map(
+      (r) => ({ status: r.status, count: r.n, totalCents: Number(r.cents) }),
+    );
+    const totals = (rows[2] as { outstanding: number; paid: number; invoice_count: number }[])[0];
+    return {
+      ok: true,
+      summary: {
+        invoiceCount: totals?.invoice_count ?? 0,
+        outstandingTotalCents: Number(totals?.outstanding ?? 0),
+        paidTotalCents: Number(totals?.paid ?? 0),
+        byStatus,
+      },
+    };
+  } catch (err) {
+    console.error("getFinanceSummary failed:", err);
+    return { ok: false, error: "Could not load the finance summary." };
+  }
+}
+
+// ------------------------------------------------------------ disputes (Master)
+export type DisputesResult =
+  | {
+      ok: true;
+      disputes: {
+        id: string;
+        caseNumber: string;
+        category: string | null;
+        priority: string;
+        status: string;
+        workspaceTitle: string | null;
+        createdAt: string;
+      }[];
+      total: number;
+    }
+  | { ok: false; error: string; setupRequired?: boolean };
+
+export async function doListDisputes(): Promise<DisputesResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const admin = await loadAdminUser();
+    if (!admin) return { ok: false, error: "UNAUTHENTICATED" };
+
+    const rows = await asUser(admin.user.id, admin.user.role, (tx) => [
+      tx`select sc.id, sc.case_number, sc.category, sc.priority, sc.status,
+                sc.created_at, cw.title as workspace_title
+         from support_cases sc
+         left join contract_workspaces cw on cw.id = sc.workspace_id
+         where lower(coalesce(sc.category, '')) like '%dispute%'
+         order by sc.created_at desc
+         limit 100`,
+    ]);
+    const list = (rows[1] as {
+      id: string;
+      case_number: string;
+      category: string | null;
+      priority: string;
+      status: string;
+      created_at: string;
+      workspace_title: string | null;
+    }[]).map((r) => ({
+      id: r.id,
+      caseNumber: r.case_number,
+      category: r.category,
+      priority: r.priority,
+      status: r.status,
+      workspaceTitle: r.workspace_title,
+      createdAt: String(r.created_at),
+    }));
+    return { ok: true, disputes: list, total: list.length };
+  } catch (err) {
+    console.error("listDisputes failed:", err);
+    return { ok: false, error: "Could not load disputes." };
   }
 }
 

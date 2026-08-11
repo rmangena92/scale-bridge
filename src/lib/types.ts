@@ -320,8 +320,15 @@ export type AdminSession = {
 export type AdminDashboardStats = {
   totalUsers: number;
   totalCompanies: number;
+  companiesVerified: number;
   companiesAwaitingVerification: number;
   activeContracts: number;
+  // Catalogue/AI surfaces: 0 with an 'available after services catalogue build'
+  // note until the services catalogue (plan item 2) and AI layers land.
+  servicesListed: number;
+  opportunitiesOpen: number;
+  aiDiscoveries: number;
+  upsellRecommendations: number;
   contractsAwaitingResponses: number;
   activeProjectWorkspaces: number;
   openSupportRequests: number;
@@ -398,6 +405,12 @@ export type AdminCompanySummary = {
   ownerId: string;
   ownerEmail: string | null;
   createdAt: string;
+  contractsCount: number;
+  activeContractsCount: number;
+  // Not in the current companies schema — always null/0 until the services
+  // catalogue build adds location/size/capacity and AI opportunity scoring.
+  location: string | null;
+  aiOpportunityScore: number;
 };
 
 /** Full admin view of one company. */
@@ -436,6 +449,42 @@ export type AdminCompanyDetail = {
     status: WorkspaceStatus;
     createdAt: string;
   }[];
+  // Master Admin Portal additions.
+  verificationHistory: CompanyAuditEntry[];
+  activity: CompanyAuditEntry[];
+  notes: CompanyNote[];
+};
+
+/** One audit-trail row shown on a company's Verification / Activity tabs. */
+export type CompanyAuditEntry = {
+  id: string;
+  action: string;
+  actorEmail: string | null;
+  details: AuditDetails | null;
+  createdAt: string;
+};
+
+/** An internal staff note on a company (company_notes table). */
+export type CompanyNote = {
+  id: string;
+  companyId: string;
+  authorUserId: string | null;
+  authorEmail: string | null;
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Filters accepted by the master company directory (listAdminCompanies). */
+export type AdminCompanyDirectoryFilters = {
+  query: string;
+  status: string; // verification_status exact match ('' = all)
+  industry: string; // companies.type exact match ('' = all)
+  activeStatus: string; // '' | 'active' | 'inactive'
+  participation: string; // '' | 'none' | 'any' | 'active'
+  location: string; // schema has no location column yet — '' only
+  service: string; // reserved for services catalogue build — '' only
 };
 
 

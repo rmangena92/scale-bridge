@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { getAdminSession } from "~/lib/admin";
@@ -23,7 +23,6 @@ export const Route = createFileRoute("/admin/login")({
 });
 
 function AdminLoginPage() {
-  const navigate = useNavigate();
   const { setupRequired } = Route.useLoaderData();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

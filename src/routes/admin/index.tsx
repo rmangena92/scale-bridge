@@ -14,15 +14,15 @@ export const Route = createFileRoute("/admin/")({
       statsError: stats.ok ? null : stats.error,
     };
   },
-  component: AdminDashboardPage,
+  component: MasterDashboardPage,
 });
 
-function AdminDashboardPage() {
+function MasterDashboardPage() {
   const { setupRequired, admin, stats, statsError } = Route.useLoaderData();
 
   if (setupRequired) {
     return (
-      <DbSetupPage title="Admin dashboard">
+      <DbSetupPage title="Master Admin dashboard">
         Connect a Postgres database (DATABASE_URL) and re-run `bun run publish`.
       </DbSetupPage>
     );
@@ -33,13 +33,12 @@ function AdminDashboardPage() {
     <div>
       <div className="mb-8">
         <p className="text-sm font-bold uppercase tracking-widest text-teal">
-          Admin Dashboard
+          Master Dashboard
         </p>
-        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-          Platform overview
-        </h1>
+        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Platform overview</h1>
         <p className="mt-2 max-w-xl text-sm text-muted">
           Live counts from the ScaleBridge database{stats ? "" : " — stats unavailable"}.
+          Services, opportunities and AI surfaces land with the services catalogue build.
         </p>
       </div>
 
@@ -57,7 +56,7 @@ function AdminDashboardPage() {
               <RecentActivity stats={stats} />
             </div>
             <div className="flex flex-col gap-6">
-              <AlertsCard />
+              <CatalogueCard />
               <ExpiringLicences stats={stats} />
             </div>
           </div>
@@ -79,7 +78,7 @@ function StatCard({
 }: {
   label: string;
   value: number | string;
-  tone?: "navy" | "teal" | "amber" | "green" | "red";
+  tone?: "navy" | "teal" | "amber" | "green" | "red" | "blue";
   hint?: string;
 }) {
   const valueColor =
@@ -91,7 +90,9 @@ function StatCard({
           ? "text-success"
           : tone === "red"
             ? "text-danger"
-            : "text-navy";
+            : tone === "blue"
+              ? "text-brand"
+              : "text-navy";
   return (
     <Card className="p-5">
       <p className="text-xs font-bold uppercase tracking-wider text-muted">
@@ -108,10 +109,14 @@ function StatCard({
 function StatGrid({ stats }: { stats: AdminDashboardStats }) {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
-      <StatCard label="Registered users" value={stats.totalUsers} />
-      <StatCard label="Registered companies" value={stats.totalCompanies} />
+      <StatCard label="Companies — total" value={stats.totalCompanies} tone="blue" />
       <StatCard
-        label="Awaiting verification"
+        label="Companies — verified"
+        value={stats.companiesVerified}
+        tone="green"
+      />
+      <StatCard
+        label="Companies — awaiting verification"
         value={stats.companiesAwaitingVerification}
         tone={stats.companiesAwaitingVerification > 0 ? "amber" : "navy"}
       />
@@ -121,13 +126,10 @@ function StatGrid({ stats }: { stats: AdminDashboardStats }) {
         tone="green"
       />
       <StatCard
-        label="Awaiting participant responses"
-        value={stats.contractsAwaitingResponses}
-        tone={stats.contractsAwaitingResponses > 0 ? "amber" : "navy"}
-      />
-      <StatCard
-        label="Active project workspaces"
-        value={stats.activeProjectWorkspaces}
+        label="Expiring documents (90 days)"
+        value={stats.expiringLicences.length}
+        tone={stats.expiringLicences.length > 0 ? "amber" : "navy"}
+        hint="licences, certificates & insurance"
       />
       <StatCard
         label="Open support requests"
@@ -140,25 +142,59 @@ function StatGrid({ stats }: { stats: AdminDashboardStats }) {
         tone={stats.openDisputes > 0 ? "red" : "navy"}
       />
       <StatCard
-        label="Pending document reviews"
-        value={stats.pendingDocumentReviews}
-        tone={stats.pendingDocumentReviews > 0 ? "amber" : "navy"}
+        label="Awaiting participant responses"
+        value={stats.contractsAwaitingResponses}
+        tone={stats.contractsAwaitingResponses > 0 ? "amber" : "navy"}
       />
       <StatCard
-        label="Outstanding payments"
-        value={`$${stats.outstandingPayments.toLocaleString(undefined, {
-          maximumFractionDigits: 2,
-        })}`}
-        tone={stats.outstandingPayments > 0 ? "amber" : "green"}
+        label="Services listed"
+        value={stats.servicesListed}
+        hint="available after services catalogue build"
       />
       <StatCard
-        label="Monthly recurring revenue"
-        value={`$${stats.monthlyRecurringRevenue.toLocaleString()}`}
-        hint="Subscriptions ship in Part B"
-        tone="teal"
+        label="Opportunities"
+        value={stats.opportunitiesOpen}
+        hint="available after services catalogue build"
       />
-      <StatCard label="Documented events" value={stats.recentActivity.length} hint="last 10 shown below" />
+      <StatCard
+        label="AI discoveries"
+        value={stats.aiDiscoveries}
+        hint="available after services catalogue build"
+      />
+      <StatCard
+        label="Upsell recommendations"
+        value={stats.upsellRecommendations}
+        hint="available after services catalogue build"
+      />
     </div>
+  );
+}
+
+function CatalogueCard() {
+  return (
+    <Card className="p-6">
+      <h2 className="text-lg font-bold">Services catalogue &amp; AI</h2>
+      <p className="mt-2 text-sm text-muted">
+        The central services catalogue, AI Service Intelligence agent and upsell
+        workflow arrive in the next build steps. Until then the Services,
+        Opportunities, AI Insights and Upsell Opportunities sections show
+        honest empty states — no records are fabricated.
+      </p>
+      <div className="mt-4 grid gap-2 text-xs text-muted sm:grid-cols-2">
+        <div className="rounded-lg bg-mist px-3 py-2">
+          <span className="font-semibold text-navy">Services catalogue</span> — plan item 2
+        </div>
+        <div className="rounded-lg bg-mist px-3 py-2">
+          <span className="font-semibold text-navy">AI Service Intelligence</span> — plan item 5
+        </div>
+        <div className="rounded-lg bg-mist px-3 py-2">
+          <span className="font-semibold text-navy">Upsell workflow</span> — plan item 6
+        </div>
+        <div className="rounded-lg bg-mist px-3 py-2">
+          <span className="font-semibold text-navy">Agent controls</span> — plan item 7
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -193,21 +229,6 @@ function RecentActivity({ stats }: { stats: AdminDashboardStats }) {
           ))}
         </ul>
       )}
-    </Card>
-  );
-}
-
-function AlertsCard() {
-  return (
-    <Card className="p-6">
-      <h2 className="text-lg font-bold">System alerts</h2>
-      <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2.5 text-sm font-medium text-success">
-        ✓ All systems operational
-      </div>
-      <p className="mt-2 text-xs text-muted">
-        Automated alerts (failed payments, expired documents, abnormal login
-        patterns) arrive in Part B.
-      </p>
     </Card>
   );
 }

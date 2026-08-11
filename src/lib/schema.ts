@@ -510,6 +510,17 @@ export const SCHEMA_SQL: string[] = [
   `alter table contract_workspaces add constraint contract_workspaces_status_check check (
     status in ('draft','active','in_review','suspended','completed','archived')
   )`,
+  // Master Admin Portal: per-note internal notes on companies. Staff can add /
+  // edit notes; every write tracks author + timestamps and is audit-logged.
+  // Complements (does not replace) the legacy companies.internal_notes array.
+  `create table if not exists company_notes (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    author_user_id uuid references users(id) on delete set null,
+    body text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
 
   // ------------------------------------------------------------------
   // Indexes
@@ -613,6 +624,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices enable row level security`,
   `alter table progress_reports enable row level security`,
   `alter table documents enable row level security`,
+  `alter table company_notes enable row level security`,
   `alter table messages enable row level security`,
   `alter table message_reads enable row level security`,
   `alter table admin_roles force row level security`,
@@ -627,6 +639,7 @@ export const SCHEMA_SQL: string[] = [
   `alter table invoices force row level security`,
   `alter table progress_reports force row level security`,
   `alter table documents force row level security`,
+  `alter table company_notes force row level security`,
   `alter table messages force row level security`,
   `alter table message_reads force row level security`,
 
@@ -1028,6 +1041,16 @@ export const SCHEMA_SQL: string[] = [
     )
   )`,
 
+  // --- company_notes: internal staff notes — admins only (never visible to
+  // companies/clients). Author is fixed at insert; body is editable.
+  `drop policy if exists company_notes_select on company_notes`,
+  `create policy company_notes_select on company_notes for select using (${IS_ADMIN})`,
+  `drop policy if exists company_notes_insert on company_notes`,
+  `create policy company_notes_insert on company_notes for insert with check (${IS_ADMIN})`,
+  `drop policy if exists company_notes_update on company_notes`,
+  `create policy company_notes_update on company_notes for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists company_notes_delete on company_notes`,
+  `create policy company_notes_delete on company_notes for delete using (${IS_ADMIN})`,
   // ------------------------------------------------------------------
   // Portal-phase policies (Admin + Client portals).
   //
@@ -1472,4 +1495,5 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists invoices_due_date_idx on invoices (due_date)`,
   `create index if not exists invoices_supplier_company_idx on invoices (supplier_company_id)`,
   `create index if not exists progress_reports_milestone_id_idx on progress_reports (milestone_id)`,
+  `create index if not exists company_notes_company_idx on company_notes (company_id, created_at desc)`,
 ];

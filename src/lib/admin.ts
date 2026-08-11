@@ -12,6 +12,10 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   doAddCaseMessage,
   doAddCompanyNote,
+  doCreateCompanyNote,
+  doGetFinanceSummary,
+  doListDisputes,
+  doUpdateCompanyNote,
   doAddContractNote,
   doAddUserNote,
   doAssignContractSupport,
@@ -54,6 +58,8 @@ import type {
 export type {
   AdminContractDetailResult,
   AdminContractsResult,
+  DisputesResult,
+  FinanceSummaryResult,
   AdminSessionResult,
   AuditLogResult,
   CompaniesResult,
@@ -104,7 +110,16 @@ export const setAdminRoles = createServerFn({ method: "POST" })
   .handler(({ data }) => doSetAdminRoles(data.userId, data.roles));
 
 export const listAdminCompanies = createServerFn({ method: "GET" })
-  .validator((d: unknown) => d as { query: string; status: string })
+  .validator(
+    (d: unknown) =>
+      d as {
+        query: string;
+        status: string;
+        industry: string;
+        activeStatus: string;
+        participation: string;
+      },
+  )
   .handler(({ data }) => doListCompanies(data));
 
 export const getAdminCompanyDetail = createServerFn({ method: "GET" })
@@ -121,6 +136,22 @@ export const setAdminCompanyStatus = createServerFn({ method: "POST" })
 export const addAdminCompanyNote = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { companyId: string; note: string })
   .handler(({ data }) => doAddCompanyNote(data.companyId, data.note));
+
+export const createAdminCompanyNote = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { companyId: string; body: string })
+  .handler(({ data }) => doCreateCompanyNote(data.companyId, data.body));
+
+export const updateAdminCompanyNote = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { noteId: string; body: string })
+  .handler(({ data }) => doUpdateCompanyNote(data.noteId, data.body));
+
+export const getFinanceSummary = createServerFn({ method: "GET" }).handler(() =>
+  doGetFinanceSummary(),
+);
+
+export const listDisputes = createServerFn({ method: "GET" }).handler(() =>
+  doListDisputes(),
+);
 
 // ---------------------------------------------------------------- Part B fns
 export const listVerificationQueue = createServerFn({ method: "GET" })

@@ -20,11 +20,20 @@ import {
 export const Route = createFileRoute("/admin/companies/")({
   loader: async () => {
     const session = await getAdminSession();
-    const result = await listAdminCompanies({ data: { query: "", status: "" } });
+    const result = await listAdminCompanies({
+      data: {
+        query: "",
+        status: "",
+        industry: "",
+        activeStatus: "",
+        participation: "",
+      },
+    });
     return {
       setupRequired: session.setupRequired,
       admin: session.admin,
       initial: result.ok ? result.companies : [],
+      industries: result.ok ? result.industries : [],
       loadError: result.ok ? null : result.error,
     };
   },
@@ -44,17 +53,45 @@ const statusTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" |
   archived: "slate",
 };
 
+/** Disabled filters — their data arrives with the services catalogue build. */
+const CATALOGUE_TOOLTIP = "Available after services catalogue build";
+
+function DisabledFilter({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="w-44" title={CATALOGUE_TOOLTIP}>
+      <Field label={label}>
+        <div className="relative">
+          <Input value={value} readOnly disabled aria-disabled="true" />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted">
+            ⓘ
+          </span>
+        </div>
+      </Field>
+    </div>
+  );
+}
+
 function CompaniesPage() {
   const loader = Route.useLoaderData();
   const [companies, setCompanies] = useState<AdminCompanySummary[]>(loader.initial);
+  const [industries, setIndustries] = useState<string[]>(loader.industries);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [activeStatus, setActiveStatus] = useState("");
+  const [participation, setParticipation] = useState("");
   const [error, setError] = useState<string | null>(loader.loadError);
   const [pending, setPending] = useState(false);
 
   if (loader.setupRequired) {
     return (
-      <DbSetupPage title="Company management">
+      <DbSetupPage title="Company directory">
         Connect a Postgres database (DATABASE_URL) to manage companies.
       </DbSetupPage>
     );
@@ -65,10 +102,13 @@ function CompaniesPage() {
     e.preventDefault();
     setPending(true);
     setError(null);
-    const result = await listAdminCompanies({ data: { query, status } });
+    const result = await listAdminCompanies({
+      data: { query, status, industry, activeStatus, participation },
+    });
     setPending(false);
     if (result.ok) {
       setCompanies(result.companies);
+      setIndustries(result.industries);
     } else {
       setError(result.error);
     }
@@ -80,10 +120,10 @@ function CompaniesPage() {
         <p className="text-sm font-bold uppercase tracking-widest text-teal">
           Companies
         </p>
-        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Company management</h1>
+        <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Master company directory</h1>
         <p className="mt-2 max-w-xl text-sm text-muted">
-          Search every registered company, review profiles and manage
-          verification and account status.
+          Search and filter every registered company. Location, size, capacity
+          and AI opportunity filters arrive with the services catalogue build.
         </p>
       </div>
 
@@ -99,8 +139,8 @@ function CompaniesPage() {
               />
             </Field>
           </div>
-          <div className="w-52">
-            <Field label="Status" htmlFor="company-status">
+          <div className="w-48">
+            <Field label="Verification status" htmlFor="company-status">
               <Select
                 id="company-status"
                 value={status}
@@ -115,10 +155,61 @@ function CompaniesPage() {
               </Select>
             </Field>
           </div>
+          <div className="w-48">
+            <Field label="Industry" htmlFor="company-industry">
+              <Select
+                id="company-industry"
+                value={industry}
+                onChange={(e) => setIndustry(e.target.value)}
+              >
+                <option value="">All industries</option>
+                {industries.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="w-44">
+            <Field label="Active status" htmlFor="company-active">
+              <Select
+                id="company-active"
+                value={activeStatus}
+                onChange={(e) => setActiveStatus(e.target.value)}
+              >
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Suspended / rejected / archived</option>
+              </Select>
+            </Field>
+          </div>
+          <div className="w-44">
+            <Field label="Contract participation" htmlFor="company-participation">
+              <Select
+                id="company-participation"
+                value={participation}
+                onChange={(e) => setParticipation(e.target.value)}
+              >
+                <option value="">Any</option>
+                <option value="active">Active contracts</option>
+                <option value="any">Any contract</option>
+                <option value="none">No contracts</option>
+              </Select>
+            </Field>
+          </div>
           <Button type="submit" disabled={pending}>
             {pending ? "Searching…" : "Search"}
           </Button>
         </form>
+        <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
+          <DisabledFilter label="Location" value="—" />
+          <DisabledFilter label="Size" value="—" />
+          <DisabledFilter label="Capacity" value="—" />
+          <DisabledFilter label="Service" value="—" />
+          <DisabledFilter label="Unused services" value="—" />
+          <DisabledFilter label="AI opportunity score" value="—" />
+        </div>
       </Card>
 
       {error && (
@@ -136,12 +227,13 @@ function CompaniesPage() {
             />
           </div>
         ) : (
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[820px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
                 <th className="px-5 py-3">Company</th>
                 <th className="px-3 py-3">Industry</th>
                 <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Contract participation</th>
                 <th className="px-3 py-3">Owner</th>
                 <th className="px-5 py-3">Created</th>
               </tr>
@@ -164,6 +256,25 @@ function CompaniesPage() {
                     <Badge tone={statusTones[c.verificationStatus] ?? "slate"}>
                       {COMPANY_STATUS_LABELS[c.verificationStatus]}
                     </Badge>
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.contractsCount === 0 ? (
+                      <span className="text-xs text-muted">No contracts</span>
+                    ) : (
+                      <span className="text-xs">
+                        <span className="font-semibold text-navy">{c.contractsCount}</span>
+                        <span className="text-muted">
+                          {" "}
+                          contract{c.contractsCount === 1 ? "" : "s"}
+                        </span>
+                        {c.activeContractsCount > 0 && (
+                          <>
+                            {" "}
+                            · <span className="font-semibold text-success">{c.activeContractsCount} active</span>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-3 text-muted">{c.ownerEmail ?? "—"}</td>
                   <td className="px-5 py-3 text-xs text-muted">

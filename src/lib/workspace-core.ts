@@ -90,6 +90,25 @@ export type NotificationsResult =
   | { ok: true; notifications: PublicNotification[] }
   | { ok: false; error: string; setupRequired?: boolean };
 
+/** A row in the public business directory. Public-facing fields only — never
+ * internal_notes or commercial data. `inviteStatus`/`participating` are
+ * per-workspace annotations (null when no workspaceId was passed). */
+export type DirectoryCompany = {
+  id: string;
+  name: string;
+  type: string | null;
+  description: string | null;
+  contactEmail: string | null;
+  verificationStatus: string;
+  createdAt: string;
+  inviteStatus: "invited" | "joined" | "verified" | "declined" | null;
+  participating: boolean;
+};
+
+export type DirectoryResult =
+  | { ok: true; companies: DirectoryCompany[] }
+  | { ok: false; error: string; setupRequired?: boolean };
+
 export type InviteResult =
   | { ok: true; invitationId: string }
   | { ok: false; error: string; setupRequired?: boolean };
@@ -2034,6 +2053,73 @@ export async function doGetMyNotifications(): Promise<NotificationsResult> {
   }
 }
 
+// ----------------------------------------------------------- directory
+/** Business directory: companies the calling user may see under RLS (verified
+ * companies are visible to every authenticated user; the caller's own company
+ * and sb_admin see everything else). Rows are public-facing — name, type,
+ * description, contact email, verification status — never internal notes or
+ * commercial data. When `workspaceId` is given, each row is annotated with the
+ * caller-visible invitation status for that workspace (joined against
+ * invitations by lower(email)) and whether the company is already assigned a
+ * work package there. */
+export async function doListDirectoryCompanies(
+  workspaceId?: string,
+): Promise<DirectoryResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
+  try {
+    await ensureSchema();
+    const user = await loadSessionUser();
+    if (!user) return { ok: false, error: "UNAUTHENTICATED" };
+    const rows = (await asUser(user.id, user.role, (tx) => [
+      workspaceId
+        ? tx`select c.id, c.name, c.type, c.description, c.contact_email,
+                    c.verification_status, c.created_at,
+                    (select i.status from invitations i
+                      where i.workspace_id = ${workspaceId}
+                        and c.contact_email is not null
+                        and lower(i.email) = lower(c.contact_email)
+                      order by i.created_at desc limit 1) as invite_status,
+                    exists (select 1 from work_packages wp
+                            where wp.workspace_id = ${workspaceId}
+                              and wp.company_id = c.id) as participating
+               from companies c
+               order by c.name`
+        : tx`select c.id, c.name, c.type, c.description, c.contact_email,
+                    c.verification_status, c.created_at,
+                    null::text as invite_status, false as participating
+               from companies c
+               order by c.name`,
+    ]))[1] as {
+      id: string;
+      name: string;
+      type: string | null;
+      description: string | null;
+      contact_email: string | null;
+      verification_status: string;
+      created_at: string;
+      invite_status: "invited" | "joined" | "verified" | "declined" | null;
+      participating: boolean;
+    }[];
+    return {
+      ok: true,
+      companies: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        description: r.description,
+        contactEmail: r.contact_email,
+        verificationStatus: r.verification_status,
+        createdAt: String(r.created_at),
+        inviteStatus: r.invite_status ?? null,
+        participating: r.participating,
+      })),
+    };
+  } catch (err) {
+    console.error("listDirectoryCompanies failed:", err);
+    return { ok: false, error: "Could not load the business directory." };
+  }
+}
+
 // ------------------------------------------------------- workspace messaging
 // Messages tab: one shared 'general' thread per workspace, seen by the lead
 // and the invited/joined/verified participants. Read tracking uses a per-user
@@ -2467,6 +2553,102 @@ async function ensureNotificationsDemo(
 }
 // Realistic sample data for demonstration: a facilities-management contract
 // with HVAC, cleaning and security work packages and three invited companies.
+// Business-directory demo block: public-facing rows for the demo companies
+// (type + contact email matching their invitation address so the directory's
+// per-workspace invite annotation works) plus two more verified companies so
+// the directory shows a mix of verified rows alongside the lead's own
+// (unverified) company. Idempotent: insert-on-conflict + update by owner.
+const DIRECTORY_DEMO_COMPANIES: {
+  email: string;
+  name: string;
+  type: string;
+  contactEmail: string;
+  verificationStatus: string;
+  description: string;
+}[] = [
+  {
+    email: "bids@meridianhvac.com",
+    name: "Meridian HVAC Ltd.",
+    type: "HVAC & mechanical",
+    contactEmail: "bids@meridianhvac.com",
+    verificationStatus: "verified",
+    description: "Planned maintenance, repairs and BMS optimisation for commercial buildings.",
+  },
+  {
+    email: "ops@clearviewcleaning.com",
+    name: "Clearview Cleaning",
+    type: "Cleaning & facilities",
+    contactEmail: "ops@clearviewcleaning.com",
+    verificationStatus: "pending",
+    description: "Daily janitorial, deep-cleaning and washroom services for offices.",
+  },
+  {
+    email: "tenders@northgatesecurity.com",
+    name: "Northgate Security",
+    type: "Security",
+    contactEmail: "tenders@northgatesecurity.com",
+    verificationStatus: "unverified",
+    description: "Site access control, visitor management and night patrols.",
+  },
+  {
+    email: "bids@gulfstarfitout.com",
+    name: "Gulf Star Fit-Out LLC",
+    type: "Fit-out & interiors",
+    contactEmail: "bids@gulfstarfitout.com",
+    verificationStatus: "verified",
+    description: "Office and retail fit-out, joinery and interior finishing.",
+  },
+  {
+    email: "bids@bluelinelogistics.com",
+    name: "Blue Line Logistics LLC",
+    type: "Logistics & transport",
+    contactEmail: "bids@bluelinelogistics.com",
+    verificationStatus: "verified",
+    description: "Delivery, haulage and materials logistics for construction sites.",
+  },
+];
+
+async function ensureDirectoryDemo(lead: { id: string; role: string }): Promise<void> {
+  const probe = (await asUser(lead.id, lead.role, (tx) => [
+    tx`select count(*)::int as n from companies where name = 'Gulf Star Fit-Out LLC'`,
+  ]))[1] as { n: number }[];
+  if ((probe[0]?.n ?? 0) > 0) return; // already seeded
+  for (const c of DIRECTORY_DEMO_COMPANIES) {
+    // User account for companies that don't have one yet (users is RLS-exempt).
+    const userRows = (await asService((tx) => [
+      tx`select id from users where lower(email) = lower(${c.email})`,
+    ]))[0] as { id: string }[];
+    const ownerId = userRows[0]?.id ?? randomUUID();
+    if (!userRows[0]) {
+      await asService((tx) => [
+        tx`insert into users (id, email, password_hash)
+           values (${ownerId}, ${c.email}, ${hashPassword(DEMO_PARTICIPANT_PASSWORD)})
+           on conflict (email) do nothing`,
+      ]);
+    }
+    // Profile + company, scoped AS the owner so RLS insert/update passes.
+    await asUser(ownerId, "company_user", (tx) => [
+      tx`insert into profiles (user_id, role, name)
+         values (${ownerId}, 'company_user', ${c.name})
+         on conflict (user_id) do nothing`,
+      tx`insert into companies (owner_id, name, type, description, contact_email, verification_status)
+         values (${ownerId}, ${c.name}, ${c.type}, ${c.description}, ${c.contactEmail}, ${c.verificationStatus})
+         on conflict (owner_id) do nothing`,
+      tx`update companies
+         set name = ${c.name}, type = ${c.type}, description = ${c.description},
+             contact_email = ${c.contactEmail},
+             verification_status = ${c.verificationStatus}, updated_at = now()
+         where owner_id = ${ownerId}`,
+    ]);
+  }
+  await asUser(lead.id, lead.role, (tx) => [
+    auditQuery(tx, lead.id, "demo.seed", {
+      directory: true,
+      companies: DIRECTORY_DEMO_COMPANIES.length,
+    }),
+  ]);
+}
+
 const DEMO_WORKSPACE_TITLE = "Riverside Plaza — Facilities Management";
 
 export async function doSeedDemo(): Promise<SimpleResult> {
@@ -2490,6 +2672,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
       await ensureMessagesDemo(user, wsId);
       // Notifications demo block (idempotent — skips once the markers exist).
       await ensureNotificationsDemo(user, wsId);
+      // Business-directory demo block (idempotent — runs once globally).
+      await ensureDirectoryDemo(user);
       const probe = (await asUser(user.id, user.role, (tx) => [
         tx`select id, name from work_packages where workspace_id = ${wsId} order by created_at asc`,
         tx`select id from pricing_submissions where workspace_id = ${wsId} limit 1`,
@@ -2644,6 +2828,8 @@ export async function doSeedDemo(): Promise<SimpleResult> {
     await ensureMessagesDemo(user, wsId);
     // Notifications demo block (idempotent — skips once the markers exist).
     await ensureNotificationsDemo(user, wsId);
+    // Business-directory demo block (idempotent — runs once globally).
+    await ensureDirectoryDemo(user);
     return { ok: true };
   } catch (err) {
     console.error("seedDemo failed:", err);

@@ -24,6 +24,7 @@ import {
   doGetMyNotifications,
   doGetWorkspace,
   doGetWorkspaces,
+  doListDirectoryCompanies,
   doInviteCompany,
   doMarkAllWorkspaceNotificationsRead,
   doMarkWorkspaceMessagesRead,
@@ -53,6 +54,8 @@ import type {
 import type { InvoiceInput, PricingInput, VariationInput } from "./workspace-core";
 
 export type {
+  DirectoryCompany,
+  DirectoryResult,
   InvitationsResult,
   InviteResult,
   NotificationsResult,
@@ -165,6 +168,10 @@ export const listMyInvitations = createServerFn({ method: "GET" }).handler(() =>
 export const listMyNotifications = createServerFn({ method: "GET" }).handler(() =>
   doGetMyNotifications(),
 );
+
+export const listDirectoryCompanies = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { workspaceId?: string })
+  .handler(({ data }) => doListDirectoryCompanies(data?.workspaceId));
 
 export const submitPricing = createServerFn({ method: "POST" })
   .validator(

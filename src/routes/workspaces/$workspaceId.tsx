@@ -25,6 +25,7 @@ import {
   deleteWorkPackage,
   getWorkspace,
   inviteCompany,
+  listDirectoryCompanies,
   markAllWorkspaceNotificationsRead,
   markWorkspaceMessagesRead,
   markWorkspaceNotificationRead,
@@ -93,7 +94,7 @@ import type {
   WorkspaceCompany,
   WorkspaceStatus,
 } from "~/lib/types";
-import type { WorkspaceDetailResult } from "~/lib/workspace";
+import type { DirectoryCompany, WorkspaceDetailResult } from "~/lib/workspace";
 
 // Spec tab order — seven tabs are live this phase (overview, companies,
 // packages, documents, tasks, milestones, audit); the rest are scaffolded as
@@ -387,7 +388,18 @@ function WorkspaceBody({
         />
       )}
       {tab === "companies" && !isLead && (
-        <YourVerificationCard participants={participantVerifications} />
+        <div className="flex flex-col gap-6">
+          <YourVerificationCard participants={participantVerifications} />
+          <DirectoryPane
+            workspaceId={workspace.id}
+            packages={packages}
+            invitable={false}
+            onChanged={async (msg) => {
+              setNotice(msg);
+              await refresh();
+            }}
+          />
+        </div>
       )}
       {tab === "packages" && (
         <PackagesTab
@@ -1016,6 +1028,7 @@ function CompaniesTab({
   packages: PublicWorkPackage[];
   onChanged: (message: string) => Promise<void>;
 }) {
+  const [view, setView] = useState<"participants" | "directory">("participants");
   const counts = {
     invited: participants.filter((p) => p.inviteStatus === "invited").length,
     joined: participants.filter((p) => p.inviteStatus === "joined").length,
@@ -1023,6 +1036,32 @@ function CompaniesTab({
     declined: participants.filter((p) => p.inviteStatus === "declined").length,
   };
   return (
+    <div>
+      <div className="mb-5 flex w-fit items-center gap-1 rounded-xl bg-mist p-1 text-sm font-semibold">
+        <button
+          type="button"
+          onClick={() => setView("participants")}
+          className={`rounded-lg px-3 py-1.5 transition-colors ${
+            view === "participants"
+              ? "bg-white text-brand shadow-sm"
+              : "text-muted hover:text-navy"
+          }`}
+        >
+          Participants
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("directory")}
+          className={`rounded-lg px-3 py-1.5 transition-colors ${
+            view === "directory"
+              ? "bg-white text-brand shadow-sm"
+              : "text-muted hover:text-navy"
+          }`}
+        >
+          Browse directory
+        </button>
+      </div>
+      {view === "participants" ? (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="flex flex-col gap-6 lg:col-span-2">
         <Card className="p-6">
@@ -1076,6 +1115,15 @@ function CompaniesTab({
           onInvited={async (msg) => onChanged(msg)}
         />
       </div>
+        </div>
+      ) : (
+        <DirectoryPane
+          workspaceId={workspace.id}
+          packages={packages}
+          invitable
+          onChanged={onChanged}
+        />
+      )}
     </div>
   );
 }
@@ -1422,6 +1470,310 @@ function InviteForm({
   );
 }
 
+// ------------------------------------------------------------- directory tab
+// Verification badge tones/labels for the FULL platform lifecycle (the legacy
+// unverified/pending/verified trio plus the admin-portal states). Reuses the
+// Badge tone system from ui.tsx (same tones VERIFICATION_BADGE_TONES uses).
+const DIRECTORY_VERIFICATION_TONES: Record<
+  string,
+  "blue" | "teal" | "green" | "amber" | "red" | "slate" | "navy"
+> = {
+  verified: "green",
+  pending: "amber",
+  documents_pending: "amber",
+  under_review: "amber",
+  unverified: "slate",
+  draft: "slate",
+  registered: "slate",
+  rejected: "red",
+  suspended: "red",
+  archived: "red",
+};
+const DIRECTORY_VERIFICATION_LABELS: Record<string, string> = {
+  verified: "Verified",
+  pending: "Verification pending",
+  documents_pending: "Documents pending",
+  under_review: "Under review",
+  unverified: "Not verified",
+  draft: "Draft",
+  registered: "Registered",
+  rejected: "Rejected",
+  suspended: "Suspended",
+  archived: "Archived",
+};
+
+/**
+ * Business directory: companies the caller may see under RLS (verified rows
+ * are public; the caller's own company and admins see more). Leads can invite
+ * a company straight from the row; participants browse read-only. RLS keeps
+ * unverified / non-owned companies out of every other company's view.
+ */
+function DirectoryPane({
+  workspaceId,
+  packages,
+  invitable,
+  onChanged,
+}: {
+  workspaceId: string;
+  packages: PublicWorkPackage[];
+  invitable: boolean;
+  onChanged: (message: string) => Promise<void>;
+}) {
+  const [companies, setCompanies] = useState<DirectoryCompany[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  async function load() {
+    const result = await listDirectoryCompanies({ data: { workspaceId } });
+    if (result.ok) {
+      setCompanies(result.companies);
+      setError(null);
+    } else {
+      setError(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = (companies ?? []).filter(
+    (c) =>
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      (c.type ?? "").toLowerCase().includes(q),
+  );
+
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">Business directory</h2>
+          <p className="mt-1 text-sm text-muted">
+            Companies on ScaleBridge that you can invite into this workspace.
+            Verified companies are visible to every signed-in business; rows
+            you don't see are not verified (or not yours).
+          </p>
+        </div>
+        <div className="w-full sm:w-64">
+          <Input
+            aria-label="Search the directory"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name or type…"
+          />
+        </div>
+      </div>
+      <div className="mt-5">
+        {error && <ErrorText>{error}</ErrorText>}
+        {!companies && !error && (
+          <p className="text-sm text-muted">Loading the directory…</p>
+        )}
+        {companies && companies.length === 0 && (
+          <EmptyState
+            title="No companies in the directory yet"
+            body="Companies appear here once their profile is set up and verified."
+          />
+        )}
+        {companies && companies.length > 0 && filtered.length === 0 && (
+          <EmptyState
+            title="No companies match your search"
+            body={`Nothing matches “${query.trim()}”. Try a different name or type.`}
+          />
+        )}
+        {filtered.length > 0 && (
+          <div className="flex flex-col gap-3">
+            {filtered.map((c) => (
+              <div
+                key={c.id}
+                className="rounded-xl border border-slate-200 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-ink">{c.name}</p>
+                      {c.type && <Badge tone="slate">{c.type}</Badge>}
+                      <Badge
+                        tone={
+                          DIRECTORY_VERIFICATION_TONES[c.verificationStatus] ??
+                          "slate"
+                        }
+                      >
+                        {DIRECTORY_VERIFICATION_LABELS[c.verificationStatus] ??
+                          c.verificationStatus}
+                      </Badge>
+                      {c.participating && (
+                        <Badge tone="teal">Participating</Badge>
+                      )}
+                      {!c.participating && c.inviteStatus && (
+                        <Badge tone={c.inviteStatus === "declined" ? "red" : "blue"}>
+                          {c.inviteStatus === "invited" && "Invited"}
+                          {c.inviteStatus === "joined" && "Joined"}
+                          {c.inviteStatus === "verified" && "Verified"}
+                          {c.inviteStatus === "declined" && "Declined"}
+                        </Badge>
+                      )}
+                    </div>
+                    {c.description && (
+                      <p className="mt-1.5 max-w-2xl text-sm text-muted">
+                        {c.description}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-muted">
+                      {c.contactEmail ?? "No contact email on file"}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    {c.participating ||
+                    c.inviteStatus === "invited" ||
+                    c.inviteStatus === "joined" ||
+                    c.inviteStatus === "verified" ? (
+                      <Button type="button" variant="outline" disabled>
+                        {c.participating ? "In this workspace" : "Invited"}
+                      </Button>
+                    ) : !invitable ? (
+                      <Button type="button" variant="outline" disabled>
+                        Browse only
+                      </Button>
+                    ) : !c.contactEmail ? (
+                      <Button type="button" variant="outline" disabled>
+                        No contact email
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          setExpanded(expanded === c.id ? null : c.id)
+                        }
+                      >
+                        {expanded === c.id ? "Cancel" : "Invite"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {expanded === c.id && (
+                  <div className="mt-4 border-t border-slate-100 pt-4">
+                    <DirectoryInviteForm
+                      workspaceId={workspaceId}
+                      company={c}
+                      packages={packages}
+                      onDone={async (msg) => {
+                        setExpanded(null);
+                        if (msg) {
+                          await load();
+                          await onChanged(msg);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/** Compact invite form pre-filled from a directory row (role + optional
+ * work package). Reuses doInviteCompany, so duplicate invitations surface the
+ * same error message as the by-email form. */
+function DirectoryInviteForm({
+  workspaceId,
+  company,
+  packages,
+  onDone,
+}: {
+  workspaceId: string;
+  company: DirectoryCompany;
+  packages: PublicWorkPackage[];
+  onDone: (msg: string | null) => Promise<void>;
+}) {
+  const [participantRole, setParticipantRole] =
+    useState<ParticipantRole>("subcontractor");
+  const [workPackage, setWorkPackage] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setPending(true);
+    setError(null);
+    const result = await inviteCompany({
+      data: {
+        workspaceId,
+        input: {
+          email: company.contactEmail ?? "",
+          companyName: company.name,
+          participantRole,
+          workPackage,
+        },
+      },
+    });
+    setPending(false);
+    if (result.ok) {
+      await onDone(`Invitation sent to ${company.contactEmail ?? company.name} ✓`);
+    } else {
+      setError(
+        result.error === "UNAUTHENTICATED"
+          ? "Your session expired — please sign in again."
+          : result.error,
+      );
+    }
+  }
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Role in the workspace" htmlFor={`dir-role-${company.id}`}>
+          <Select
+            id={`dir-role-${company.id}`}
+            value={participantRole}
+            onChange={(e) =>
+              setParticipantRole(e.target.value as ParticipantRole)
+            }
+          >
+            {PARTICIPANT_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {PARTICIPANT_ROLE_LABELS[r]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Work package (optional)" htmlFor={`dir-pkg-${company.id}`}>
+          <Select
+            id={`dir-pkg-${company.id}`}
+            value={workPackage}
+            onChange={(e) => setWorkPackage(e.target.value)}
+          >
+            <option value="">No specific package</option>
+            {packages.map((p) => (
+              <option key={p.id} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          {pending ? "Sending…" : "Send invitation"}
+        </Button>
+        <p className="text-xs text-muted">
+          {company.contactEmail ?? company.name}
+        </p>
+      </div>
+    </form>
+  );
+}
 // --------------------------------------------------------------- scope tab
 function PackagesTab({
   workspace,

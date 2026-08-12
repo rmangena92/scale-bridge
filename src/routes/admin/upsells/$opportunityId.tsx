@@ -82,6 +82,7 @@ function UpsellDetailPage() {
     );
   }
 
+  if (!opp) return null;
   const statusTone = UPSELL_STATUS_TONES[opp.status] ?? "slate";
   const transitions = UPSELL_TRANSITIONS[opp.status] ?? [];
   const statusLabel = UPSELL_STATUS_LABELS[opp.status] ?? opp.status;
@@ -149,7 +150,7 @@ function UpsellDetailPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Recommendation">
+        <Card><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Recommendation</h3>
           <dl className="space-y-3 text-sm">
             <div>
               <dt className="font-semibold text-ink">Suggested service</dt>
@@ -182,7 +183,7 @@ function UpsellDetailPage() {
           </dl>
         </Card>
 
-        <Card title="Company">
+        <Card><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Company</h3>
           <dl className="space-y-3 text-sm">
             <div>
               <dt className="font-semibold text-ink">Verification status</dt>
@@ -213,7 +214,7 @@ function UpsellDetailPage() {
         </Card>
       </div>
 
-      <Card title={`Evidence (${opp.evidenceItems.length})`} className="mt-4">
+      <Card className="mt-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Evidence (${opp.evidenceItems.length})</h3>
         {opp.evidenceItems.length === 0 ? (
           <EmptyState title="No evidence attached" body="This opportunity has no source evidence items recorded." />
         ) : (
@@ -231,7 +232,7 @@ function UpsellDetailPage() {
                     {e.sourceUrl}
                   </a>
                 ) : (
-                  <p className="mt-1 text-xs text-muted">Source: {e.source ?? "-"}</p>
+                  <p className="mt-1 text-xs text-muted">Source: {e.sourceUrl ?? "-"}</p>
                 )}
               </li>
             ))}
@@ -240,7 +241,7 @@ function UpsellDetailPage() {
       </Card>
 
       {opp.relevantOpportunities.length > 0 ? (
-        <Card title="Relevant opportunities" className="mt-4">
+        <Card className="mt-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Relevant opportunities</h3>
           <ul className="space-y-2">
             {opp.relevantOpportunities.map((r, i) => (
               <li key={i} className="rounded-lg bg-slate-50 p-3 text-sm">
@@ -253,7 +254,7 @@ function UpsellDetailPage() {
         </Card>
       ) : null}
 
-      <Card title="Workflow" className="mt-4">
+      <Card className="mt-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Workflow</h3>
         <p className="mb-3 text-sm text-muted">
           Current status: <span className="font-semibold text-ink">{statusLabel}</span>.{" "}
           {canMutate
@@ -265,8 +266,9 @@ function UpsellDetailPage() {
             {transitions.map((t) => (
               <Button
                 key={t}
-                variant={t === "Sent" || t === "Approved" ? "primary" : t === "Rejected" || t === "Declined" ? "danger" : "secondary"}
+                variant={t === "Sent" || t === "Approved" ? "primary" : t === "Rejected" || t === "Declined" ? "secondary" : "secondary"}
                 disabled={busyTarget !== null}
+                className={t === "Rejected" || t === "Declined" ? "text-red-700" : ""}
                 onClick={() => transition(t)}
               >
                 {busyTarget === t ? "Updating..." : t === "Sent" ? `Approve & send to ${opp.companyName ?? "company"}` : UPSELL_STATUS_LABELS[t]}
@@ -279,7 +281,7 @@ function UpsellDetailPage() {
         ) : null}
       </Card>
 
-      <Card title="Admin notes" className="mt-4">
+      <Card className="mt-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Admin notes</h3>
         <Textarea
           rows={4}
           value={notes}
@@ -297,7 +299,7 @@ function UpsellDetailPage() {
         </div>
       </Card>
 
-      <Card title="Audit trail" className="mt-4">
+      <Card className="mt-4"><h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Audit trail</h3>
         {opp.history.length === 0 ? (
           <EmptyState title="No audit events" body="No status or send events have been recorded for this opportunity." />
         ) : (

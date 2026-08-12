@@ -751,18 +751,23 @@ export const updatePlatformPreference = createServerFn({ method: "POST" })
 // Master Admin upsell & cross-sell workflow: list/detail/status/notes/create
 // with the human-approval gate, immutable audit and owner notifications.
 // Backend: src/lib/admin-upsells-core.ts (mirrors admin-settings-core pattern).
+// NOTE: only the server-only do* functions come from the core. The workflow
+// constants come from the pure upsell-constants module so client bundles can
+// import them without pulling postgres into the browser graph.
 import {
   doCreateUpsellOpportunity,
   doGetUpsellOpportunity,
   doListUpsellOpportunities,
   doUpdateUpsellNotes,
   doUpdateUpsellStatus,
+} from "./admin-upsells-core";
+import {
   UPSELL_MUTATE_ROLES,
+  UPSELL_STATUSES,
   UPSELL_STATUS_LABELS,
   UPSELL_STATUS_TONES,
   UPSELL_TRANSITIONS,
-  UPSELL_STATUSES,
-} from "./admin-upsells-core";
+} from "./upsell-constants";
 import type { UpsellCreateInput, UpsellListFilters } from "./admin-upsells-core";
 export type {
   UpsellActionResult,

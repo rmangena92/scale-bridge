@@ -33,71 +33,16 @@ import { asUser, dbConfigured, ensureSchema } from "./db";
 import type { Tx } from "./db";
 import { aiAuditQuery } from "./ai-agent";
 import type { AdminActor } from "./admin-subscriptions-actions";
+import {
+  UPSELL_MUTATE_ROLES,
+  UPSELL_STATUSES,
+  UPSELL_STATUS_LABELS,
+  UPSELL_TRANSITIONS,
+} from "./upsell-constants";
+import type { UpsellWorkflowStatus } from "./upsell-constants";
+export type { UpsellWorkflowStatus } from "./upsell-constants";
 
-export const UPSELL_MUTATE_ROLES = ["operations", "compliance", "super_admin"] as const;
 
-/** DB status values for the upsell workflow (matches the table check clause). */
-export const UPSELL_STATUSES = [
-  "Suggested",
-  "Under_Review",
-  "Approved",
-  "Rejected",
-  "Awaiting_Company_Confirmation",
-  "Sent",
-  "Interested",
-  "Declined",
-  "Converted",
-  "Closed",
-] as const;
-export type UpsellWorkflowStatus = (typeof UPSELL_STATUSES)[number];
-
-export const UPSELL_STATUS_LABELS: Record<UpsellWorkflowStatus, string> = {
-  Suggested: "Suggested",
-  Under_Review: "Under Review",
-  Approved: "Approved",
-  Rejected: "Rejected",
-  Awaiting_Company_Confirmation: "Awaiting Company Confirmation",
-  Sent: "Sent",
-  Interested: "Interested",
-  Declined: "Declined",
-  Converted: "Converted",
-  Closed: "Closed",
-};
-
-export const UPSELL_STATUS_TONES: Record<
-  UpsellWorkflowStatus,
-  "green" | "red" | "amber" | "slate" | "blue" | "teal" | "navy"
-> = {
-  Suggested: "slate",
-  Under_Review: "blue",
-  Approved: "teal",
-  Rejected: "red",
-  Awaiting_Company_Confirmation: "amber",
-  Sent: "navy",
-  Interested: "green",
-  Declined: "red",
-  Converted: "green",
-  Closed: "slate",
-};
-
-/**
- * Allowed transitions. Terminal states (Converted, Closed) are absent.
- * Sent is gated on prior approval: only Approved and
- * Awaiting_Company_Confirmation (itself only reachable from Approved) may
- * transition to Sent.
- */
-export const UPSELL_TRANSITIONS: Record<UpsellWorkflowStatus, UpsellWorkflowStatus[]> = {
-  Suggested: ["Under_Review", "Rejected"],
-  Under_Review: ["Approved", "Rejected"],
-  Approved: ["Sent", "Awaiting_Company_Confirmation", "Rejected"],
-  Awaiting_Company_Confirmation: ["Sent", "Declined"],
-  Sent: ["Interested", "Declined"],
-  Interested: ["Converted", "Closed"],
-  Declined: ["Closed"],
-  Rejected: ["Closed"],
-  Converted: [],
-  Closed: [],
-};
 
 export type UpsellListFilters = {
   status?: string | null;

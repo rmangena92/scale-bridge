@@ -17,6 +17,8 @@ import {
 } from "~/components/ui";
 import { getSessionUser } from "~/lib/auth";
 import { createWorkspace, listWorkspaces, seedDemoData } from "~/lib/workspace";
+import { getSubscriptionStatusFn } from "~/lib/billing";
+import { gateDestination } from "~/lib/membership";
 import {
   WORKSPACE_BADGE_TONES,
   WORKSPACE_STATUSES,
@@ -31,6 +33,22 @@ export const Route = createFileRoute("/workspaces/")({
       return { setupRequired: true as const, user: null, workspaces: [] };
     }
     if (!session.user) throw redirect({ to: "/login" });
+    // Subscription gate — workspace owners (lead contractors) must hold a
+    // valid membership; participants (company_user) pass through unchanged.
+    if (session.user.role === "lead_contractor") {
+      const gateResult = await getSubscriptionStatusFn();
+      if (gateResult.ok) {
+        const dest = gateDestination(gateResult.data.status);
+        if (dest.kind === "pricing") throw redirect({ to: "/membership" });
+        if (dest.kind === "resume") {
+          throw redirect({
+            to: "/membership",
+            search: { resume: gateResult.data.subscriptionId ?? undefined },
+          });
+        }
+        if (dest.kind === "recovery") throw redirect({ to: "/billing-recovery" });
+      }
+    }
     const result = await listWorkspaces();
     return {
       setupRequired: false as const,

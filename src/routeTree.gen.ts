@@ -11,9 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as MembershipConfirmedRouteImport } from './routes/membership-confirmed'
+import { Route as MembershipCheckoutRouteImport } from './routes/membership-checkout'
+import { Route as MembershipRouteImport } from './routes/membership'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as ClientRouteImport } from './routes/client'
+import { Route as BillingRecoveryRouteImport } from './routes/billing-recovery'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -78,6 +83,26 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembershipConfirmedRoute = MembershipConfirmedRouteImport.update({
+  id: '/membership-confirmed',
+  path: '/membership-confirmed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembershipCheckoutRoute = MembershipCheckoutRouteImport.update({
+  id: '/membership-checkout',
+  path: '/membership-checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembershipRoute = MembershipRouteImport.update({
+  id: '/membership',
+  path: '/membership',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -91,6 +116,11 @@ const InvitationsRoute = InvitationsRouteImport.update({
 const ClientRoute = ClientRouteImport.update({
   id: '/client',
   path: '/client',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BillingRecoveryRoute = BillingRecoveryRouteImport.update({
+  id: '/billing-recovery',
+  path: '/billing-recovery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
@@ -366,9 +396,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
+  '/billing-recovery': typeof BillingRecoveryRoute
   '/client': typeof ClientRouteWithChildren
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
+  '/membership': typeof MembershipRoute
+  '/membership-checkout': typeof MembershipCheckoutRoute
+  '/membership-confirmed': typeof MembershipConfirmedRoute
+  '/onboarding': typeof OnboardingRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/admin/ai-insights': typeof AdminAiInsightsRoute
@@ -425,8 +460,13 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app': typeof AppRoute
+  '/billing-recovery': typeof BillingRecoveryRoute
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
+  '/membership': typeof MembershipRoute
+  '/membership-checkout': typeof MembershipCheckoutRoute
+  '/membership-confirmed': typeof MembershipConfirmedRoute
+  '/onboarding': typeof OnboardingRoute
   '/signup': typeof SignupRoute
   '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
@@ -478,9 +518,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRoute
+  '/billing-recovery': typeof BillingRecoveryRoute
   '/client': typeof ClientRouteWithChildren
   '/invitations': typeof InvitationsRoute
   '/login': typeof LoginRoute
+  '/membership': typeof MembershipRoute
+  '/membership-checkout': typeof MembershipCheckoutRoute
+  '/membership-confirmed': typeof MembershipConfirmedRoute
+  '/onboarding': typeof OnboardingRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/admin/ai-insights': typeof AdminAiInsightsRoute
@@ -540,9 +585,14 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/billing-recovery'
     | '/client'
     | '/invitations'
     | '/login'
+    | '/membership'
+    | '/membership-checkout'
+    | '/membership-confirmed'
+    | '/onboarding'
     | '/signup'
     | '/workspaces'
     | '/admin/ai-insights'
@@ -599,8 +649,13 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/app'
+    | '/billing-recovery'
     | '/invitations'
     | '/login'
+    | '/membership'
+    | '/membership-checkout'
+    | '/membership-confirmed'
+    | '/onboarding'
     | '/signup'
     | '/admin/ai-insights'
     | '/admin/audit-log'
@@ -651,9 +706,14 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/app'
+    | '/billing-recovery'
     | '/client'
     | '/invitations'
     | '/login'
+    | '/membership'
+    | '/membership-checkout'
+    | '/membership-confirmed'
+    | '/onboarding'
     | '/signup'
     | '/workspaces'
     | '/admin/ai-insights'
@@ -712,9 +772,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRoute
+  BillingRecoveryRoute: typeof BillingRecoveryRoute
   ClientRoute: typeof ClientRouteWithChildren
   InvitationsRoute: typeof InvitationsRoute
   LoginRoute: typeof LoginRoute
+  MembershipRoute: typeof MembershipRoute
+  MembershipCheckoutRoute: typeof MembershipCheckoutRoute
+  MembershipConfirmedRoute: typeof MembershipConfirmedRoute
+  OnboardingRoute: typeof OnboardingRoute
   SignupRoute: typeof SignupRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
 }
@@ -733,6 +798,34 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/membership-confirmed': {
+      id: '/membership-confirmed'
+      path: '/membership-confirmed'
+      fullPath: '/membership-confirmed'
+      preLoaderRoute: typeof MembershipConfirmedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/membership-checkout': {
+      id: '/membership-checkout'
+      path: '/membership-checkout'
+      fullPath: '/membership-checkout'
+      preLoaderRoute: typeof MembershipCheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/membership': {
+      id: '/membership'
+      path: '/membership'
+      fullPath: '/membership'
+      preLoaderRoute: typeof MembershipRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -754,6 +847,13 @@ declare module '@tanstack/react-router' {
       path: '/client'
       fullPath: '/client'
       preLoaderRoute: typeof ClientRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/billing-recovery': {
+      id: '/billing-recovery'
+      path: '/billing-recovery'
+      fullPath: '/billing-recovery'
+      preLoaderRoute: typeof BillingRecoveryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -1330,9 +1430,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRoute,
+  BillingRecoveryRoute: BillingRecoveryRoute,
   ClientRoute: ClientRouteWithChildren,
   InvitationsRoute: InvitationsRoute,
   LoginRoute: LoginRoute,
+  MembershipRoute: MembershipRoute,
+  MembershipCheckoutRoute: MembershipCheckoutRoute,
+  MembershipConfirmedRoute: MembershipConfirmedRoute,
+  OnboardingRoute: OnboardingRoute,
   SignupRoute: SignupRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
 }

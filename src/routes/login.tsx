@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { signIn } from "~/lib/auth";
@@ -17,7 +17,6 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +30,10 @@ function LoginPage() {
     const result = await signIn({ data: { email, password } });
     setPending(false);
     if (result.ok) {
-      await navigate({ to: "/app" });
+      // Hard redirect: a fresh SSR load re-runs the /app loader (subscription
+      // gate) with the new session cookie, so the client lands on the right
+      // destination (dashboard, pricing window, resume, or billing recovery).
+      window.location.assign("/app");
       return;
     }
     if (result.setupRequired) {

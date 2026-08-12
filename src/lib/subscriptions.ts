@@ -1973,6 +1973,102 @@ export async function getBillingOverview(actorId: string, role: string): Promise
   }
 }
 
+/**
+ * Routing-relevant subscription state for post-auth gating (Part 1 client UI).
+ * Read-only: never mutates subscription state; loads the latest subscription
+ * for the actor plus its plan/commitment/features in one round-trip.
+ */
+export type SubscriptionGate = {
+  hasSubscription: boolean;
+  subscriptionId: string | null;
+  status: SubscriptionStatus | null;
+  statusLabel: string | null;
+  planId: string | null;
+  planCode: string | null;
+  planName: string | null;
+  priceAel: number;
+  interval: BillingInterval;
+  startDate: string | null;
+  nextBillingDate: string | null;
+  minCommitmentEnd: string | null;
+  minCommitmentCompleted: boolean;
+  downgradeEligibleDate: string | null;
+  features: string[];
+  activeFeatures: { key: string; value: EntitlementValue }[];
+};
+
+export async function getSubscriptionGate(
+  actorId: string,
+  role: string,
+): Promise<Result<SubscriptionGate>> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", code: "SETUP_REQUIRED" };
+  try {
+    await ensureSchema();
+    const { subscription, customer, plan, commitment } = await getActiveSubscription(actorId, role);
+    if (!subscription || !customer) {
+      return {
+        ok: true,
+        data: {
+          hasSubscription: false,
+          subscriptionId: null,
+          status: null,
+          statusLabel: null,
+          planId: null,
+          planCode: null,
+          planName: null,
+          priceAel: 0,
+          interval: "monthly",
+          startDate: null,
+          nextBillingDate: null,
+          minCommitmentEnd: null,
+          minCommitmentCompleted: false,
+          downgradeEligibleDate: null,
+          features: [],
+          activeFeatures: [],
+        },
+      };
+    }
+    const [, feats, ents] = (await asUser(actorId, role, (tx) => [
+      tx`select feature from plan_features where plan_id = ${plan?.id ?? null} order by sort_order`,
+      tx`select entitlement_key, value from plan_entitlements where plan_id = ${plan?.id ?? null}`,
+    ])) as unknown as [
+      unknown,
+      { feature: string }[],
+      { entitlement_key: string; value: unknown }[],
+    ];
+    const commitmentDone = commitment
+      ? commitment.completed || commitment.commitment_end_date.getTime() <= Date.now()
+      : true;
+    return {
+      ok: true,
+      data: {
+        hasSubscription: true,
+        subscriptionId: subscription.id,
+        status: subscription.status,
+        statusLabel: STATUS_DISPLAY[subscription.status] ?? subscription.status,
+        planId: plan?.id ?? null,
+        planCode: plan?.code ?? null,
+        planName: plan?.name ?? null,
+        priceAel: planPrice(plan, subscription.billing_interval),
+        interval: subscription.billing_interval,
+        startDate: subscription.started_at ? str(subscription.started_at) : null,
+        nextBillingDate: subscription.next_billing_date ? str(subscription.next_billing_date) : null,
+        minCommitmentEnd: commitment ? str(commitment.commitment_end_date) : null,
+        minCommitmentCompleted: commitmentDone,
+        downgradeEligibleDate: commitment ? str(commitment.commitment_end_date) : null,
+        features: feats.map((f) => f.feature),
+        activeFeatures: ents.map((e) => ({
+          key: e.entitlement_key,
+          value: (e.value ?? {}) as EntitlementValue,
+        })),
+      },
+    };
+  } catch (err) {
+    console.error("getSubscriptionGate failed:", err);
+    return { ok: false, error: "Could not load your subscription status." };
+  }
+}
+
 // ------------------------------------------------------------ list endpoints
 export async function listInvoices(
   actorId: string,

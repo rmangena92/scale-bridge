@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { signUp } from "~/lib/auth";
@@ -17,7 +17,6 @@ export const Route = createFileRoute("/signup")({
 });
 
 function SignUpPage() {
-  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +31,10 @@ function SignUpPage() {
     try {
       const result = await signUp({ data: { name, email, password } });
       if (result.ok) {
-        await navigate({ to: "/app" });
+        // Hard redirect: the fresh session must be picked up by a new SSR load
+        // of /app so the subscription gate routes the new client to the
+        // membership pricing window.
+        window.location.assign("/app");
         return;
       }
       if (result.setupRequired) {

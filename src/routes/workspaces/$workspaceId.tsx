@@ -16,6 +16,8 @@ import {
   Textarea,
 } from "~/components/ui";
 import { getSessionUser } from "~/lib/auth";
+import { getSubscriptionStatusFn } from "~/lib/billing";
+import { gateDestination } from "~/lib/membership";
 import {
   addDocument,
   createInvoice,
@@ -160,6 +162,22 @@ export const Route = createFileRoute("/workspaces/$workspaceId")({
       return { setupRequired: true as const, user: null, detail: null as null };
     }
     if (!session.user) throw redirect({ to: "/login" });
+    // Subscription gate — workspace owners (lead contractors) must hold a
+    // valid membership; participants (company_user) pass through unchanged.
+    if (session.user.role === "lead_contractor") {
+      const gateResult = await getSubscriptionStatusFn();
+      if (gateResult.ok) {
+        const dest = gateDestination(gateResult.data.status);
+        if (dest.kind === "pricing") throw redirect({ to: "/membership" });
+        if (dest.kind === "resume") {
+          throw redirect({
+            to: "/membership",
+            search: { resume: gateResult.data.subscriptionId ?? undefined },
+          });
+        }
+        if (dest.kind === "recovery") throw redirect({ to: "/billing-recovery" });
+      }
+    }
     const detail = await getWorkspace({ data: { workspaceId: params.workspaceId } });
     return {
       setupRequired: false as const,

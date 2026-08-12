@@ -19,6 +19,16 @@ import { getSessionUser, updateProfile } from "~/lib/auth";
 import { getAdminSession } from "~/lib/admin";
 import { getMyCompany, saveCompany } from "~/lib/company";
 import { listMyInvitations, listWorkspaces } from "~/lib/workspace";
+import { getSubscriptionStatusFn } from "~/lib/billing";
+import type { SubscriptionGate } from "~/lib/billing";
+import {
+  COMMITMENT_NOTICE,
+  formatAed,
+  formatDate,
+  gateDestination,
+  intervalLabel,
+  isPartnerAudienceRole,
+} from "~/lib/membership";
 import {
   ROLE_LABELS,
   VERIFICATION_LABELS,
@@ -37,12 +47,31 @@ export const Route = createFileRoute("/app")({
         company: null,
         workspaces: [],
         pendingInvitations: [],
+        plan: null,
       };
     }
     if (!session.user) throw redirect({ to: "/login" });
     // Admins get the Master Admin Portal, not this legacy workspace dashboard.
     const adminSession = await getAdminSession();
     if (adminSession.admin) throw redirect({ to: "/admin" });
+    // Post-auth subscription routing (spec §1) — partner-company audience only.
+    // Client-org, buyer and other roles pass through unchanged.
+    let plan: SubscriptionGate | null = null;
+    if (isPartnerAudienceRole(session.user.role)) {
+      const gateResult = await getSubscriptionStatusFn();
+      if (gateResult.ok) {
+        const dest = gateDestination(gateResult.data.status);
+        if (dest.kind === "pricing") throw redirect({ to: "/membership" });
+        if (dest.kind === "resume") {
+          throw redirect({
+            to: "/membership",
+            search: { resume: gateResult.data.subscriptionId ?? undefined },
+          });
+        }
+        if (dest.kind === "recovery") throw redirect({ to: "/billing-recovery" });
+        plan = gateResult.data; // dashboard kinds reach here
+      }
+    }
     const companyResult = await getMyCompany();
     const [workspacesResult, invitesResult] = await Promise.all([
       listWorkspaces(),
@@ -56,13 +85,14 @@ export const Route = createFileRoute("/app")({
       pendingInvitations: invitesResult.ok
         ? invitesResult.invitations.filter((i) => i.status === "invited")
         : [],
+      plan,
     };
   },
   component: AppPage,
 });
 
 function AppPage() {
-  const { setupRequired, user, company, workspaces, pendingInvitations } =
+  const { setupRequired, user, company, workspaces, pendingInvitations, plan } =
     Route.useLoaderData();
   if (setupRequired || !user) {
     return (
@@ -74,6 +104,7 @@ function AppPage() {
   }
   return (
     <AppShell user={user}>
+      {plan && <PlanBanner plan={plan} />}
       <div className="mb-8">
         <p className="text-sm font-bold uppercase tracking-widest text-teal">
           Dashboard
@@ -93,6 +124,68 @@ function AppPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+// ------------------------------------------------------ subscription banner
+function PlanBanner({ plan }: { plan: SubscriptionGate }) {
+  const cancelled =
+    plan.status === "cancel_at_period_end" || plan.status === "cancellation_requested";
+  const pendingChange =
+    plan.status === "upgrade_pending" || plan.status === "downgrade_scheduled";
+  return (
+    <div className="mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-card)]">
+        <div className="flex items-center gap-4">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-navy text-teal">
+            <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+              <path d="M2.5 10h19M6.5 15h4" />
+            </svg>
+          </span>
+          <div>
+            <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-navy">
+              {plan.planName ?? "No plan"}
+              <Badge tone="green">{plan.statusLabel}</Badge>
+              {cancelled && <Badge tone="amber">Cancellation in progress</Badge>}
+              {pendingChange && <Badge tone="blue">Plan change pending</Badge>}
+            </p>
+            <p className="mt-0.5 text-xs text-muted">
+              {formatAed(plan.priceAel)} {intervalLabel(plan.interval)}
+              {plan.nextBillingDate
+                ? ` · next payment ${formatDate(plan.nextBillingDate)}`
+                : ""}
+              {plan.minCommitmentEnd
+                ? ` · minimum commitment ends ${formatDate(plan.minCommitmentEnd)}`
+                : ""}
+              {plan.downgradeEligibleDate && !plan.minCommitmentCompleted
+                ? ` · downgrade available ${formatDate(plan.downgradeEligibleDate)}`
+                : ""}
+            </p>
+          </div>
+        </div>
+        {/* Billing area is Part 2 — this is the stub hook. */}
+        <a
+          href="#"
+          onClick={(e) => e.preventDefault()}
+          title="Billing management (upgrades, downgrades, invoices) arrives in the next release"
+          className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-navy hover:border-brand hover:text-brand"
+        >
+          Billing
+        </a>
+      </div>
+      {cancelled && (
+        <p className="mt-2 rounded-lg border border-amber/40 bg-amber/10 px-3 py-2 text-xs text-[#6b4c00]">
+          Your membership continues until the end of your current billing period.
+          {plan.nextBillingDate
+            ? ` Access remains active through ${formatDate(plan.nextBillingDate)}.`
+            : ""}
+        </p>
+      )}
+      {plan.status === "active" && (
+        <p className="mt-2 text-xs text-muted">{COMMITMENT_NOTICE}</p>
+      )}
+    </div>
   );
 }
 

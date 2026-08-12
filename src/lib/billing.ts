@@ -21,6 +21,7 @@ import {
   confirmDowngrade,
   confirmUpgrade,
   getBillingOverview,
+  getSubscriptionGate,
   listInvoices,
   listPublishedPlans,
   listSubscriptionHistory,
@@ -36,6 +37,7 @@ export type {
   BillingOverview,
   PlanPublic,
   SandboxSimulation,
+  SubscriptionGate,
   SubscriptionStatus,
 } from "./subscriptions";
 
@@ -48,6 +50,15 @@ async function guardUser(): Promise<{ id: string; role: string } | null> {
 /** Public pricing-window read — Active plans + features + entitlements. */
 export const listPlans = createServerFn({ method: "GET" }).handler(
   () => listPublishedPlans(),
+);
+
+/** Post-auth routing gate — subscription status + plan info in one call. */
+export const getSubscriptionStatusFn = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const user = await guardUser();
+    if (!user) return { ok: false as const, error: "UNAUTHENTICATED" };
+    return getSubscriptionGate(user.id, user.role);
+  },
 );
 
 /** Billing area: current plan card, upgrade/downgrade/cancel states, invoices, history. */

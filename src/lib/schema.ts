@@ -2940,4 +2940,115 @@ export const SCHEMA_SQL: string[] = [
   )`,
   `create index if not exists admin_view_sessions_token_idx on admin_view_sessions (token_hash)`,
   `create index if not exists admin_view_sessions_admin_idx on admin_view_sessions (admin_user_id, created_at desc)`,
+  // ------------------------------------------------------------------
+  // Platform Settings (owner-approved scope 2026-08-12): system preferences,
+  // workspace-fee tiers, success-fee caps, and landing-page content blocks.
+  // Every change is written together with an immutable audit_logs row
+  // (action prefix settings.*) inside one asUser batch. Public surfaces read
+  // live values through the `to scalebridge_app` select policies below (same
+  // pattern as membership_plans_select_public). No delete policy anywhere:
+  // rows are edited/archived in place so the audit trail stays complete.
+  // ------------------------------------------------------------------
+  `create table if not exists platform_settings (
+    key text primary key,
+    value jsonb not null,
+    description text,
+    updated_by uuid references users(id) on delete set null,
+    updated_at timestamptz not null default now()
+  )`,
+  `alter table platform_settings enable row level security`,
+  `alter table platform_settings force row level security`,
+  `drop policy if exists platform_settings_select_public on platform_settings`,
+  `create policy platform_settings_select_public on platform_settings
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists platform_settings_select on platform_settings`,
+  `create policy platform_settings_select on platform_settings for select using (${IS_ADMIN})`,
+  `drop policy if exists platform_settings_insert on platform_settings`,
+  `create policy platform_settings_insert on platform_settings for insert with check (${IS_ADMIN})`,
+  `drop policy if exists platform_settings_update on platform_settings`,
+  `create policy platform_settings_update on platform_settings for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `create table if not exists workspace_fee_tiers (
+    id uuid primary key default gen_random_uuid(),
+    label text not null unique,
+    min_contract_value numeric(14,2) not null,
+    max_contract_value numeric(14,2),
+    fee numeric(12,2),
+    sort_order int not null default 100,
+    status text not null default 'Active' check (status in ('Active','Archived'))
+  )`,
+  `alter table workspace_fee_tiers enable row level security`,
+  `alter table workspace_fee_tiers force row level security`,
+  `drop policy if exists workspace_fee_tiers_select_public on workspace_fee_tiers`,
+  `create policy workspace_fee_tiers_select_public on workspace_fee_tiers
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists workspace_fee_tiers_select on workspace_fee_tiers`,
+  `create policy workspace_fee_tiers_select on workspace_fee_tiers for select using (${IS_ADMIN})`,
+  `drop policy if exists workspace_fee_tiers_insert on workspace_fee_tiers`,
+  `create policy workspace_fee_tiers_insert on workspace_fee_tiers for insert with check (${IS_ADMIN})`,
+  `drop policy if exists workspace_fee_tiers_update on workspace_fee_tiers`,
+  `create policy workspace_fee_tiers_update on workspace_fee_tiers for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `create table if not exists success_fee_caps (
+    id uuid primary key default gen_random_uuid(),
+    label text not null unique,
+    contract_value_min numeric(14,2) not null,
+    contract_value_max numeric(14,2),
+    cap numeric(12,2),
+    note text,
+    sort_order int not null default 100,
+    status text not null default 'Active' check (status in ('Active','Archived'))
+  )`,
+  `alter table success_fee_caps enable row level security`,
+  `alter table success_fee_caps force row level security`,
+  `drop policy if exists success_fee_caps_select_public on success_fee_caps`,
+  `create policy success_fee_caps_select_public on success_fee_caps
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists success_fee_caps_select on success_fee_caps`,
+  `create policy success_fee_caps_select on success_fee_caps for select using (${IS_ADMIN})`,
+  `drop policy if exists success_fee_caps_insert on success_fee_caps`,
+  `create policy success_fee_caps_insert on success_fee_caps for insert with check (${IS_ADMIN})`,
+  `drop policy if exists success_fee_caps_update on success_fee_caps`,
+  `create policy success_fee_caps_update on success_fee_caps for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `create table if not exists landing_content (
+    key text primary key,
+    content jsonb not null,
+    updated_by uuid references users(id) on delete set null,
+    updated_at timestamptz not null default now()
+  )`,
+  `alter table landing_content enable row level security`,
+  `alter table landing_content force row level security`,
+  `drop policy if exists landing_content_select_public on landing_content`,
+  `create policy landing_content_select_public on landing_content
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists landing_content_select on landing_content`,
+  `create policy landing_content_select on landing_content for select using (${IS_ADMIN})`,
+  `drop policy if exists landing_content_insert on landing_content`,
+  `create policy landing_content_insert on landing_content for insert with check (${IS_ADMIN})`,
+  `drop policy if exists landing_content_update on landing_content`,
+  `create policy landing_content_update on landing_content for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  // Default rows so the Admin Settings editor and public surfaces have a
+  // coherent starting point (idempotent; admins edit in place).
+  `insert into workspace_fee_tiers (label, min_contract_value, max_contract_value, fee, sort_order) values
+    ('under_250k', 0, 250000, 250, 10),
+    ('250k_to_1m', 250000, 1000000, 750, 20),
+    ('1m_to_5m', 1000000, 5000000, 1500, 30),
+    ('5m_to_25m', 5000000, 25000000, 3500, 40),
+    ('over_25m_custom', 25000000, null, null, 50)
+   on conflict (label) do nothing`,
+  `insert into success_fee_caps (label, contract_value_min, contract_value_max, cap, note, sort_order) values
+    ('under_1m', 0, 1000000, 10000, 'Cap on success fees for ScaleBridge-facilitated partnerships under AED 1M', 10),
+    ('1m_to_5m', 1000000, 5000000, 25000, 'Cap on success fees for ScaleBridge-facilitated partnerships AED 1M to 5M', 20),
+    ('over_5m_negotiated', 5000000, null, null, 'Success-fee cap negotiated above AED 5M', 30)
+   on conflict (label) do nothing`,
+  `insert into platform_settings (key, value, description) values
+    ('platform_name', '"ScaleBridge"', 'Platform display name'),
+    ('support_email', '"support@scalebridge.test"', 'Support contact email'),
+    ('currency_display', '"AED"', 'Currency code used for pricing display')
+   on conflict (key) do nothing`,
+  `insert into landing_content (key, content) values
+    ('hero.headline_lead', '"Big contracts."'),
+    ('hero.headline_accent', '"Open to every capable business."'),
+    ('hero.supporting', '"ScaleBridge connects businesses into trusted commercial partnerships, enabling them to combine capabilities, share responsibility, and fulfil larger contracts without leaving smaller companies behind."'),
+    ('pricing.intro', '{"heading":"Simple, transparent pricing","body":"Entry-level access is free, verification is affordable, and anchor partners pay for coordinated delivery. Annual billing includes two months free."}'),
+    ('footer.tagline', '"ScaleBridge — The infrastructure for lasting business partnerships."')
+   on conflict (key) do nothing`,
 ];

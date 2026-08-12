@@ -653,3 +653,96 @@ export const adminRevokeEntitlement = createServerFn({ method: "POST" })
     if (!actor) return { ok: false as const, error: "Admin session required." };
     return doAdminRevokeEntitlement(actor, data.companyId, data.grantId, data.reason, data.notify);
   });
+
+// ------------------------------------------------------------- Platform Settings
+// Master Admin Portal Settings (owner-approved scope 2026-08-12): fees & plan
+// pricing, workspace fees, success-fee caps, landing content, preferences.
+import {
+  doGetAdminSettings,
+  doUpdateLandingContent,
+  doUpdateMembershipPlan,
+  doUpdatePlatformPreference,
+  doUpdateSuccessFeeCap,
+  doUpdateWorkspaceFeeTier,
+} from "./admin-settings-core";
+import type {
+  JsonValue,
+  MembershipPlanInput,
+  SuccessFeeCapInput,
+  WorkspaceFeeInput,
+} from "./admin-settings-core";
+export type {
+  AdminSettingsData,
+  JsonValue,
+  SettingsActionResult,
+  SettingsFeeTier,
+  SettingsPlan,
+  SettingsSuccessCap,
+} from "./admin-settings-core";
+
+export const getAdminSettings = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await getAdminSession();
+  const actor = await resolveAdminActor(session);
+  if (!actor) return { ok: false as const, error: "Admin session required." };
+  return doGetAdminSettings(actor);
+});
+
+export const updateMembershipPlan = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { planId: string; input: MembershipPlanInput },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateMembershipPlan(actor, data.planId, data.input);
+  });
+
+export const updateWorkspaceFeeTier = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { tierId: string; input: WorkspaceFeeInput },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateWorkspaceFeeTier(actor, data.tierId, data.input);
+  });
+
+export const updateSuccessFeeCap = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { capId: string; input: SuccessFeeCapInput },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateSuccessFeeCap(actor, data.capId, data.input);
+  });
+
+export const updateLandingContent = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { key: string; content: JsonValue },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateLandingContent(actor, data.key, data.content);
+  });
+
+export const updatePlatformPreference = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { key: string; value: string; description: string | null },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdatePlatformPreference(actor, data.key, data.value, data.description);
+  });

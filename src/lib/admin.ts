@@ -71,6 +71,12 @@ import {
   doListClientPortals,
   doListPartnershipWorkspaces,
 } from "./admin-subscriptions-core";
+import {
+  doAdminGrantEntitlement,
+  doAdminListCompanyEntitlements,
+  doAdminRevokeEntitlement,
+} from "./admin-entitlements-actions";
+import type { EntitlementGrantType } from "./admin-entitlements-actions";
 import type {
   AdminRole,
   DocumentReviewAction,
@@ -133,6 +139,12 @@ export type {
   DowngradePreview,
   UpgradePreview,
 } from "./admin-subscriptions-actions";
+export type {
+  CompanyEntitlementsResult,
+  CompanyEntitlementRow,
+  EntitlementGrantType,
+  EntitlementStatusMark,
+} from "./admin-entitlements-actions";
 
 export const getAdminSession = createServerFn({ method: "GET" }).handler(() =>
   doGetAdminSession(),
@@ -589,4 +601,50 @@ export const adminCancelSubscription = createServerFn({ method: "POST" })
     const actor = await resolveAdminActor(session);
     if (!actor) return { ok: false as const, error: "Admin session required." };
     return doAdminCancelSubscription(actor, data.companyId, data.mode, data.reason);
+  });
+// -------------------------------------------------- feature entitlements (spec 7)
+export const adminListCompanyEntitlements = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminListCompanyEntitlements(actor, data.companyId);
+  });
+export const adminGrantEntitlement = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        companyId: string;
+        entitlementKey: string;
+        grantType: EntitlementGrantType;
+        reason: string;
+        expiresAt?: string | null;
+        effectiveFrom?: string | null;
+        notify: boolean;
+      },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminGrantEntitlement(actor, data.companyId, {
+      entitlementKey: data.entitlementKey,
+      grantType: data.grantType,
+      reason: data.reason,
+      expiresAt: data.expiresAt ?? null,
+      effectiveFrom: data.effectiveFrom ?? null,
+      notify: data.notify,
+    });
+  });
+export const adminRevokeEntitlement = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as { companyId: string; grantId: string; reason: string; notify: boolean },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminRevokeEntitlement(actor, data.companyId, data.grantId, data.reason, data.notify);
   });

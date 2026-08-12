@@ -69,6 +69,7 @@ import { Route as AdminCompaniesIndexRouteImport } from './routes/admin/companie
 import { Route as ClientContractsWorkspaceIdRouteImport } from './routes/client/contracts/$workspaceId'
 import { Route as AdminVerificationCompanyIdRouteImport } from './routes/admin/verification/$companyId'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin/users/$userId'
+import { Route as AdminUpsellsOpportunityIdRouteImport } from './routes/admin/upsells/$opportunityId'
 import { Route as AdminSupportCaseIdRouteImport } from './routes/admin/support/$caseId'
 import { Route as AdminSettingsRolesRouteImport } from './routes/admin/settings/roles'
 import { Route as AdminServicesCategoriesRouteImport } from './routes/admin/services/categories'
@@ -380,6 +381,12 @@ const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
   path: '/$userId',
   getParentRoute: () => AdminUsersRoute,
 } as any)
+const AdminUpsellsOpportunityIdRoute =
+  AdminUpsellsOpportunityIdRouteImport.update({
+    id: '/$opportunityId',
+    path: '/$opportunityId',
+    getParentRoute: () => AdminUpsellsRoute,
+  } as any)
 const AdminSupportCaseIdRoute = AdminSupportCaseIdRouteImport.update({
   id: '/$caseId',
   path: '/$caseId',
@@ -453,7 +460,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/support': typeof AdminSupportRouteWithChildren
-  '/admin/upsells': typeof AdminUpsellsRoute
+  '/admin/upsells': typeof AdminUpsellsRouteWithChildren
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
   '/admin/workspaces': typeof AdminWorkspacesRoute
@@ -481,6 +488,7 @@ export interface FileRoutesByFullPath {
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
   '/admin/settings/roles': typeof AdminSettingsRolesRoute
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
+  '/admin/upsells/$opportunityId': typeof AdminUpsellsOpportunityIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
@@ -516,7 +524,7 @@ export interface FileRoutesByTo {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/services': typeof AdminServicesRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
-  '/admin/upsells': typeof AdminUpsellsRoute
+  '/admin/upsells': typeof AdminUpsellsRouteWithChildren
   '/admin/workspaces': typeof AdminWorkspacesRoute
   '/client/approvals': typeof ClientApprovalsRoute
   '/client/documents': typeof ClientDocumentsRoute
@@ -541,6 +549,7 @@ export interface FileRoutesByTo {
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
   '/admin/settings/roles': typeof AdminSettingsRolesRoute
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
+  '/admin/upsells/$opportunityId': typeof AdminUpsellsOpportunityIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
@@ -584,7 +593,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/support': typeof AdminSupportRouteWithChildren
-  '/admin/upsells': typeof AdminUpsellsRoute
+  '/admin/upsells': typeof AdminUpsellsRouteWithChildren
   '/admin/users': typeof AdminUsersRouteWithChildren
   '/admin/verification': typeof AdminVerificationRouteWithChildren
   '/admin/workspaces': typeof AdminWorkspacesRoute
@@ -612,6 +621,7 @@ export interface FileRoutesById {
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
   '/admin/settings/roles': typeof AdminSettingsRolesRoute
   '/admin/support/$caseId': typeof AdminSupportCaseIdRoute
+  '/admin/upsells/$opportunityId': typeof AdminUpsellsOpportunityIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/admin/services/categories'
     | '/admin/settings/roles'
     | '/admin/support/$caseId'
+    | '/admin/upsells/$opportunityId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
@@ -744,6 +755,7 @@ export interface FileRouteTypes {
     | '/admin/services/categories'
     | '/admin/settings/roles'
     | '/admin/support/$caseId'
+    | '/admin/upsells/$opportunityId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
@@ -814,6 +826,7 @@ export interface FileRouteTypes {
     | '/admin/services/categories'
     | '/admin/settings/roles'
     | '/admin/support/$caseId'
+    | '/admin/upsells/$opportunityId'
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
@@ -1266,6 +1279,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersUserIdRouteImport
       parentRoute: typeof AdminUsersRoute
     }
+    '/admin/upsells/$opportunityId': {
+      id: '/admin/upsells/$opportunityId'
+      path: '/$opportunityId'
+      fullPath: '/admin/upsells/$opportunityId'
+      preLoaderRoute: typeof AdminUpsellsOpportunityIdRouteImport
+      parentRoute: typeof AdminUpsellsRoute
+    }
     '/admin/support/$caseId': {
       id: '/admin/support/$caseId'
       path: '/$caseId'
@@ -1412,6 +1432,18 @@ const AdminSupportRouteWithChildren = AdminSupportRoute._addFileChildren(
   AdminSupportRouteChildren,
 )
 
+interface AdminUpsellsRouteChildren {
+  AdminUpsellsOpportunityIdRoute: typeof AdminUpsellsOpportunityIdRoute
+}
+
+const AdminUpsellsRouteChildren: AdminUpsellsRouteChildren = {
+  AdminUpsellsOpportunityIdRoute: AdminUpsellsOpportunityIdRoute,
+}
+
+const AdminUpsellsRouteWithChildren = AdminUpsellsRoute._addFileChildren(
+  AdminUpsellsRouteChildren,
+)
+
 interface AdminUsersRouteChildren {
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
@@ -1455,7 +1487,7 @@ interface AdminRouteChildren {
   AdminSettingsRoute: typeof AdminSettingsRouteWithChildren
   AdminSubscriptionsRoute: typeof AdminSubscriptionsRoute
   AdminSupportRoute: typeof AdminSupportRouteWithChildren
-  AdminUpsellsRoute: typeof AdminUpsellsRoute
+  AdminUpsellsRoute: typeof AdminUpsellsRouteWithChildren
   AdminUsersRoute: typeof AdminUsersRouteWithChildren
   AdminVerificationRoute: typeof AdminVerificationRouteWithChildren
   AdminWorkspacesRoute: typeof AdminWorkspacesRoute
@@ -1478,7 +1510,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminSettingsRoute: AdminSettingsRouteWithChildren,
   AdminSubscriptionsRoute: AdminSubscriptionsRoute,
   AdminSupportRoute: AdminSupportRouteWithChildren,
-  AdminUpsellsRoute: AdminUpsellsRoute,
+  AdminUpsellsRoute: AdminUpsellsRouteWithChildren,
   AdminUsersRoute: AdminUsersRouteWithChildren,
   AdminVerificationRoute: AdminVerificationRouteWithChildren,
   AdminWorkspacesRoute: AdminWorkspacesRoute,

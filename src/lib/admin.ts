@@ -746,3 +746,75 @@ export const updatePlatformPreference = createServerFn({ method: "POST" })
     if (!actor) return { ok: false as const, error: "Admin session required." };
     return doUpdatePlatformPreference(actor, data.key, data.value, data.description);
   });
+
+// ------------------------------------------------------------- AI upsell workflow
+// Master Admin upsell & cross-sell workflow: list/detail/status/notes/create
+// with the human-approval gate, immutable audit and owner notifications.
+// Backend: src/lib/admin-upsells-core.ts (mirrors admin-settings-core pattern).
+import {
+  doCreateUpsellOpportunity,
+  doGetUpsellOpportunity,
+  doListUpsellOpportunities,
+  doUpdateUpsellNotes,
+  doUpdateUpsellStatus,
+  UPSELL_MUTATE_ROLES,
+  UPSELL_STATUS_LABELS,
+  UPSELL_STATUS_TONES,
+  UPSELL_TRANSITIONS,
+  UPSELL_STATUSES,
+} from "./admin-upsells-core";
+import type { UpsellCreateInput, UpsellListFilters } from "./admin-upsells-core";
+export type {
+  UpsellActionResult,
+  UpsellCreateInput,
+  UpsellDetailResult,
+  UpsellDetailRow,
+  UpsellEvidenceItem,
+  UpsellListFilters,
+  UpsellListResult,
+  UpsellListRow,
+  UpsellWorkflowStatus,
+} from "./admin-upsells-core";
+export { UPSELL_MUTATE_ROLES, UPSELL_STATUS_LABELS, UPSELL_STATUS_TONES, UPSELL_TRANSITIONS, UPSELL_STATUSES };
+export const listAdminUpsellOpportunities = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { filters: UpsellListFilters })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doListUpsellOpportunities(actor, data.filters);
+  });
+export const getAdminUpsellOpportunity = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { opportunityId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doGetUpsellOpportunity(actor, data.opportunityId);
+  });
+export const createAdminUpsellOpportunity = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { input: UpsellCreateInput })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doCreateUpsellOpportunity(actor, data.input);
+  });
+export const updateAdminUpsellStatus = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { opportunityId: string; status: string; notes?: string | null },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateUpsellStatus(actor, data.opportunityId, data.status, data.notes ?? null);
+  });
+export const updateAdminUpsellNotes = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { opportunityId: string; notes: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateUpsellNotes(actor, data.opportunityId, data.notes);
+  });

@@ -188,7 +188,7 @@ export interface BillingProvider {
 
 export const sandboxProvider: BillingProvider = {
   name: "sandbox",
-  async createPaymentIntent({ amountAel, subscriptionId, planId, billingInterval }) {
+  async createPaymentIntent({ amountAel, subscriptionId }) {
     return {
       providerPaymentIntentId: `sandbox_pi_${randomUUID().slice(0, 8)}_${amountAel}_${subscriptionId.slice(0, 8)}`,
     };
@@ -271,11 +271,15 @@ export type PlanPublic = {
   sortOrder: number;
   status: "Active" | "Archived";
   features: string[];
-  entitlements: { key: string; value: Record<string, unknown> }[];
+  entitlements: { key: string; value: EntitlementValue }[];
 };
 
 /** Serializable structured payload attached to a failure (UI hints: dates, amounts). */
 export type ResultExtra = Record<string, string | number | boolean | null>;
+/** Serializable jsonb value carried inside plan entitlements (server-fn safe). */
+export type EntitlementValue = Record<string, string | number | boolean | null>;
+/** Serializable jsonb details payload on history rows (server-fn safe). */
+export type JsonDetails = Record<string, string | number | boolean | null>;
 
 export type Result<T = undefined> =
   | { ok: true; data: T }
@@ -320,7 +324,6 @@ type CommitmentRow = {
   completed: boolean;
   completed_at: Date | null;
 };
-type PlanWithMeta = PlanRow & { feature_list?: string[] };
 
 const num = (v: string | number | null | undefined): number | null =>
   v === null || v === undefined ? null : Number(v);
@@ -349,12 +352,12 @@ export async function listPublishedPlans(): Promise<Result<PlanPublic[]>> {
           where p.status = 'Active'
           order by f.plan_id, f.sort_order, f.feature`,
     ])) as unknown as [PlanRow[], EntitlementRow[], FeatureRow[]];
-    const entByPlan = new Map<string, { key: string; value: Record<string, unknown> }[]>();
+    const entByPlan = new Map<string, { key: string; value: EntitlementValue }[]>();
     for (const e of ents) {
       const list = entByPlan.get(e.plan_id) ?? [];
       list.push({
         key: e.entitlement_key,
-        value: (e.value ?? { enabled: true }) as Record<string, unknown>,
+        value: (e.value ?? { enabled: true }) as EntitlementValue,
       });
       entByPlan.set(e.plan_id, list);
     }
@@ -387,19 +390,6 @@ export async function listPublishedPlans(): Promise<Result<PlanPublic[]>> {
   }
 }
 
-/** Entitlements for one plan (admin/owner path — used by the activation flow). */
-async function getEntitlementsForPlan(
-  actorId: string,
-  role: string,
-  planId: string,
-): Promise<EntitlementRow[]> {
-  const rows = (await asUser(actorId, role, (tx) => [
-    tx`select e.plan_id as plan_id, e.entitlement_key as entitlement_key, e.value as value
-         from plan_entitlements e
-        where e.plan_id = ${planId}`,
-  ]))[1] as EntitlementRow[];
-  return rows;
-}
 
 // -------------------------------------------------------------- customers
 /** Find (or create) the customer record for a user (+ optional company). */
@@ -580,8 +570,8 @@ export async function selectPlan(
     if ("error" in customer) return { ok: false, error: customer.error };
     const existingRows = (await asUser(actorId, role, (tx) => [
       tx`select id, status from subscriptions where customer_id = ${customer.id} order by created_at desc limit 1`,
-    ])) as unknown as [{ id: string; status: SubscriptionStatus }[]];
-    const existing = existingRows[0];
+    ]))[1] as { id: string; status: SubscriptionStatus }[];
+    const existing = existingRows[0] ?? null;
     if (existing) {
       if (existing.status === "active" || existing.status === "cancel_at_period_end") {
         return {
@@ -916,7 +906,6 @@ async function applyInvoicePaymentSucceeded(
 ): Promise<void> {
   const sub = subId ? await loadSubscription(actorId, role, subId) : null;
   if (!sub) throw new Error("Subscription not found for invoice.payment_succeeded.");
-  const customer = await loadCustomer(actorId, role, sub.customer_id);
   const now = new Date();
   const periodStart = sub.next_billing_date ?? now;
   const periodEnd = addInterval(periodStart, sub.billing_interval);
@@ -977,7 +966,7 @@ async function applyInvoicePaymentFailed(
   subId: string,
   amount: number,
   planId: string | null,
-  interval: BillingInterval,
+  _interval: BillingInterval,
 ): Promise<void> {
   const sub = subId ? await loadSubscription(actorId, role, subId) : null;
   if (!sub) throw new Error("Subscription not found for invoice.payment_failed.");
@@ -1128,7 +1117,7 @@ async function applySubscriptionUpdated(
     tx`select id, to_plan_id from downgrade_requests
         where subscription_id = ${sub.id} and status = 'Confirmed'
         order by requested_at desc limit 1`,
-  ]]))[1] as { id: string; to_plan_id: string }[];
+  ]))[1] as { id: string; to_plan_id: string }[];
   const downgradeRequest = reqRows[0] ?? null;
   const isDowngrade = Boolean(downgradeRequest);
   const prevPlanId = sub.plan_id;
@@ -1345,7 +1334,7 @@ export async function confirmUpgrade(
            from upgrade_requests u
            join subscriptions s on s.id = u.subscription_id
           where u.id = ${requestId}`,
-    ]]))[1] as {
+    ]))[1] as {
       id: string;
       subscription_id: string;
       from_plan_id: string | null;
@@ -1510,7 +1499,7 @@ export async function confirmDowngrade(
            from downgrade_requests d
            join subscriptions s on s.id = d.subscription_id
           where d.id = ${requestId}`,
-    ]]))[1] as {
+    ]))[1] as {
       id: string;
       subscription_id: string;
       to_plan_id: string;
@@ -1655,7 +1644,7 @@ export async function confirmCancellation(
            from cancellation_requests c
            join subscriptions s on s.id = c.subscription_id
           where c.id = ${requestId}`,
-    ]]))[1] as {
+    ]))[1] as {
       id: string;
       subscription_id: string;
       status: string;
@@ -1741,7 +1730,7 @@ export async function applyScheduledChanges(
            from subscriptions s
           where (s.status = 'downgrade_scheduled' or s.status = 'cancel_at_period_end')
             and (${force}::uuid is null or s.id = ${force})`,
-    ]]))[1] as {
+    ]))[1] as {
       subscription_id: string;
       plan_id: string | null;
       billing_interval: BillingInterval;
@@ -1767,11 +1756,12 @@ export async function applyScheduledChanges(
         continue;
       }
       // downgrade_scheduled
-      const dReq = (await asUser(actorId, role, (tx) => [
+      const dReqRows = (await asUser(actorId, role, (tx) => [
         tx`select id, to_plan_id from downgrade_requests
             where subscription_id = ${due.subscription_id} and status = 'Pending'
             order by requested_at desc limit 1`,
-      ]]))[1] as { id: string; to_plan_id: string }[];
+      ]))[1] as { id: string; to_plan_id: string }[];
+      const dReq = dReqRows[0] ?? null;
       if (!dReq) continue;
       const res = await confirmDowngrade(actorId, role, dReq.id);
       if (res.ok) downgradesApplied += 1;
@@ -1802,7 +1792,7 @@ export type BillingOverview = {
     downgradeEligible: boolean;
     cancelledAt: string | null;
     features: string[];
-    activeFeatures: { key: string; value: Record<string, unknown> }[];
+    activeFeatures: { key: string; value: EntitlementValue }[];
   };
   upgrade: {
     canUpgrade: boolean;
@@ -1831,7 +1821,7 @@ export type BillingOverview = {
     paymentStatus: string | null;
     confirmationStatus: string | null;
     sourceEvent: string | null;
-    details: Record<string, unknown> | null;
+    details: JsonDetails | null;
   }[];
 };
 
@@ -1861,7 +1851,7 @@ export async function getBillingOverview(actorId: string, role: string): Promise
         },
       };
     }
-    const [, _plansAll, feats, ents, activeFeats, invRows, histRows, cancelReqRows, higherRows] = (await asUser(actorId, role, (tx) => [
+    const [, _plansAll, feats, ents, _activeFeats, invRows, histRows, cancelReqRows, higherRows] = (await asUser(actorId, role, (tx) => [
       tx`select id, code, name, price_monthly_ael, price_annual_ael, sort_order, status from membership_plans`,
       tx`select f.feature as feature from plan_features f where f.plan_id = ${plan?.id ?? null} order by f.sort_order`,
       tx`select e.entitlement_key as entitlement_key, e.value as value from plan_entitlements e where e.plan_id = ${plan?.id ?? null}`,
@@ -1928,7 +1918,7 @@ export async function getBillingOverview(actorId: string, role: string): Promise
           downgradeEligible: commitmentDone,
           cancelledAt: subscription.cancelled_at ? str(subscription.cancelled_at) : null,
           features: feats.map((f) => f.feature),
-          activeFeatures: ents.map((e) => ({ key: e.entitlement_key, value: (e.value ?? {}) as Record<string, unknown> })),
+          activeFeatures: ents.map((e) => ({ key: e.entitlement_key, value: (e.value ?? {}) as EntitlementValue })),
         },
         upgrade: {
           canUpgrade: subscription.status === "active" && higherRows.length > 0,
@@ -1973,7 +1963,7 @@ export async function getBillingOverview(actorId: string, role: string): Promise
           paymentStatus: h.payment_status,
           confirmationStatus: h.confirmation_status,
           sourceEvent: h.source_event,
-          details: (h.details ?? null) as Record<string, unknown> | null,
+          details: (h.details ?? null) as JsonDetails | null,
         })),
       },
     };
@@ -2059,7 +2049,7 @@ export async function listSubscriptionHistory(
         paymentStatus: h.payment_status,
         confirmationStatus: h.confirmation_status,
         sourceEvent: h.source_event,
-        details: (h.details ?? null) as Record<string, unknown> | null,
+        details: (h.details ?? null) as JsonDetails | null,
       })),
     };
   } catch (err) {

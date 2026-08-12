@@ -37,6 +37,7 @@ import {
   ErrorText,
   Textarea,
 } from "~/components/ui";
+import { AdminSubscriptionPanel } from "~/components/AdminSubscriptionPanel";
 
 export const Route = createFileRoute("/admin/companies/$companyId/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -57,7 +58,6 @@ export const Route = createFileRoute("/admin/companies/$companyId/")({
       relationships: rels.ok ? rels.relationships : [],
       relationshipsError: rels.ok ? null : rels.error,
       subscription: sub.ok ? sub.detail : null,
-      subscriptionError: sub.ok ? null : sub.error,
     };
   },
   component: CompanyDetailPage,
@@ -126,7 +126,6 @@ function CompanyDetailPage() {
     relationships,
     relationshipsError,
     subscription,
-    subscriptionError,
   } = Route.useLoaderData();
   if (setupRequired) {
     return (
@@ -149,28 +148,28 @@ function CompanyDetailPage() {
   return (
     <CompanyDetailBody
       adminCanMutate={admin.canMutate}
+      staffRoles={admin.staffRoles ?? []}
       detail={detail}
       relationships={relationships}
       relationshipsError={relationshipsError}
       subscription={subscription}
-      subscriptionError={subscriptionError}
     />
   );
 }
 function CompanyDetailBody({
   adminCanMutate,
+  staffRoles,
   detail,
   relationships: initialRelationships,
   relationshipsError: initialRelationshipsError,
   subscription,
-  subscriptionError,
 }: {
   adminCanMutate: boolean;
+  staffRoles: string[];
   detail: AdminCompanyDetail;
   relationships: CompanyServiceRow[];
   relationshipsError: string | null;
   subscription: AdminCompanySubscriptionDetail | null;
-  subscriptionError: string | null;
 }) {
   const [status, setStatus] = useState(detail.company.verificationStatus);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -328,7 +327,9 @@ function CompanyDetailBody({
         <OverviewTab detail={detail} status={status} onAction={runAction} adminCanMutate={adminCanMutate} busy={busy} onTab={setTab} subscription={subscription} />
       )}
       {tab === "membership" && <MembershipTab detail={detail} subscription={subscription} />}
-      {tab === "subscription" && <SubscriptionTab subscription={subscription} subscriptionError={subscriptionError} />}
+      {tab === "subscription" && (
+        <SubscriptionTab companyId={detail.company.id} staffRoles={staffRoles} adminCanMutate={adminCanMutate} />
+      )}
       {tab === "entitlements" && <EntitlementsTab detail={detail} subscription={subscription} />}
       {tab === "information" && <InformationTab detail={detail} />}
       {tab === "services" && <ServicesTab relationships={relationships} relationshipsError={relationshipsError} />}
@@ -1529,162 +1530,22 @@ function MembershipTab({
 
 // ------------------------------------------------------------- Subscription
 function SubscriptionTab({
-  subscription,
-  subscriptionError,
+  companyId,
+  staffRoles,
+  adminCanMutate,
 }: {
-  subscription: AdminCompanySubscriptionDetail | null;
-  subscriptionError: string | null;
+  companyId: string;
+  staffRoles: string[];
+  adminCanMutate: boolean;
 }) {
-  if (subscriptionError) {
-    return (
-      <Card className="p-6">
-        <ErrorText>{subscriptionError}</ErrorText>
-      </Card>
-    );
-  }
-  if (!subscription || !subscription.subscription) {
-    return (
-      <Card className="p-6">
-        <EmptyState
-          title="No subscription record"
-          body="Nothing to show yet - this company has not created a subscription."
-        />
-      </Card>
-    );
-  }
-  const sub = subscription.subscription;
-  const plan = subscription.plan;
-  const outstanding = subscription.invoices.filter((i) => i.status === "Open").length;
-  const failedPayment = subscription.invoices.some((i) => i.status === "Failed");
-  const pendingUpgrade = subscription.upgradeRequests.find((u) => u.status === "Pending" || u.status === "Confirmed");
-  const pendingDowngrade = subscription.downgradeRequests.find((d) => d.status === "Pending" || d.status === "Confirmed");
-  const cancellation = subscription.cancellationRequests.find((cc) => cc.status === "Pending" || cc.status === "Confirmed");
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="p-6">
-          <SectionHeading title="Subscription" body="Read-only management panel - actions arrive with a later stage." />
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Fact label="Plan" value={plan?.name ?? "-"} />
-            <Fact label="Billing interval" value={sub.billingInterval === "annual" ? "Annual" : "Monthly"} />
-            <Fact label="Status" value={sub.statusLabel} />
-            <Fact label="Started" value={fmtDate2(sub.startedAt)} />
-            <Fact label="Current period" value={`${fmtDate2(sub.currentPeriodStart)} → ${fmtDate2(sub.currentPeriodEnd)}`} />
-            <Fact label="Next billing date" value={fmtDate2(sub.nextBillingDate)} />
-            <Fact label="Outstanding balance" value={outstanding > 0 ? `${outstanding} open invoice${outstanding === 1 ? "" : "s"}` : "None"} />
-            <Fact label="Failed payment" value={failedPayment ? "Yes - action required" : "No"} />
-            <Fact label="Pending upgrade" value={pendingUpgrade ? pendingUpgrade.status : "-"} />
-            <Fact label="Pending downgrade" value={pendingDowngrade ? pendingDowngrade.status : "-"} />
-            <Fact label="Cancellation status" value={cancellation ? `${cancellation.status} (${cancellation.mode})` : sub.status === "cancelled" || sub.status === "cancel_at_period_end" ? sub.statusLabel : "-"} />
-            <Fact label="Stripe customer ID" value={subscription.customer?.providerCustomerId ?? "- (sandbox)"} />
-            <Fact label="Stripe subscription ID" value={sub.providerSubscriptionId ?? "- (sandbox)"} />
-          </dl>
-        </Card>
-        <Card className="p-6">
-          <SectionHeading title="Payment method" />
-          {subscription.paymentMethods.length === 0 ? (
-            <p className="text-sm text-muted">No payment method on file.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {subscription.paymentMethods.map((m) => (
-                <li key={m.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium text-ink">
-                    {m.brand ?? m.type} •••• {m.last4 ?? ""}
-                    {m.expiry ? ` (${m.expiry})` : ""}
-                  </span>
-                  <Badge tone="teal">{m.isDefault ? "Default" : "-"}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
-      <Card className="p-6">
-        <SectionHeading title="Invoices" body="Subscription invoices from the billing provider (sandbox)." />
-        {subscription.invoices.length === 0 ? (
-          <p className="text-sm text-muted">No invoices yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
-                  <th className="py-2 pr-3">Number</th>
-                  <th className="py-2 pr-3">Period</th>
-                  <th className="py-2 pr-3">Total</th>
-                  <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3">Due</th>
-                  <th className="py-2">Paid</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {subscription.invoices.map((i) => (
-                  <tr key={i.id}>
-                    <td className="py-2 pr-3 font-medium text-navy">{i.invoiceNumber}</td>
-                    <td className="py-2 pr-3 text-muted">{fmtDate2(i.billingPeriodStart)} → {fmtDate2(i.billingPeriodEnd)}</td>
-                    <td className="py-2 pr-3">{fmtAed(i.totalAel)}</td>
-                    <td className="py-2 pr-3"><Badge tone="slate">{i.status}</Badge></td>
-                    <td className="py-2 pr-3 text-muted">{fmtDate2(i.dueDate)}</td>
-                    <td className="py-2 text-muted">{fmtDate2(i.paidAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="p-6">
-          <SectionHeading title="Payment events" />
-          {subscription.paymentEvents.length === 0 ? (
-            <p className="text-sm text-muted">No payment events yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {subscription.paymentEvents.slice(0, 12).map((e) => (
-                <li key={e.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium text-ink">{e.eventType.replace(/_/g, " ")}</span>
-                  <span className="text-xs text-muted">{fmtAed(e.amountAel)} · {fmtDate2(e.occurredAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-        <Card className="p-6">
-          <SectionHeading title="Webhook history" body="Latest billing-provider webhook events (all tenants)." />
-          {subscription.webhooks.length === 0 ? (
-            <p className="text-sm text-muted">No webhook events yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {subscription.webhooks.slice(0, 12).map((w) => (
-                <li key={w.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium text-ink">{w.eventType}</span>
-                  <span className="text-xs text-muted">{w.processed ? "processed" : "unprocessed"} · {fmtDate2(w.receivedAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
-      <Card className="p-6">
-        <SectionHeading title="Subscription history" body="Plan changes, commitments and payment outcomes." />
-        {subscription.history.length === 0 ? (
-          <p className="text-sm text-muted">No history yet.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {subscription.history.map((h) => (
-              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <span className="font-medium capitalize text-ink">{h.changeType.replace(/_/g, " ")}</span>
-                <span className="text-xs text-muted">
-                  {h.billingAmountAel !== null ? fmtAed(h.billingAmountAel) : ""} · {fmtDate2(h.effectiveDate)} · {h.confirmationStatus ?? ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-    </div>
+    <AdminSubscriptionPanel
+      companyId={companyId}
+      staffRoles={staffRoles}
+      adminCanMutate={adminCanMutate}
+    />
   );
 }
-
 // ------------------------------------------------- Feature Entitlements
 function EntitlementsTab({
   subscription,

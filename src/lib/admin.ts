@@ -127,6 +127,12 @@ export type {
   AdminSubscriptionListResult,
   AdminSubscriptionRow,
 } from "./admin-subscriptions-core";
+export type {
+  AdminBillingActionResult,
+  AdminBillingPanel,
+  DowngradePreview,
+  UpgradePreview,
+} from "./admin-subscriptions-actions";
 
 export const getAdminSession = createServerFn({ method: "GET" }).handler(() =>
   doGetAdminSession(),

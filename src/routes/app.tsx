@@ -18,7 +18,7 @@ import {
 import { getSessionUser, updateProfile } from "~/lib/auth";
 import { getAdminSession } from "~/lib/admin";
 import { getMyCompany, saveCompany } from "~/lib/company";
-import { listMyInvitations, listWorkspaces } from "~/lib/workspace";
+import { listMyInvitations, listMyNotifications, listWorkspaces } from "~/lib/workspace";
 import { getSubscriptionStatusFn } from "~/lib/billing";
 import type { SubscriptionGate } from "~/lib/billing";
 import {
@@ -35,7 +35,7 @@ import {
   WORKSPACE_BADGE_TONES,
   WORKSPACE_STATUS_LABELS,
 } from "~/lib/types";
-import type { PublicCompany, PublicInvitation, PublicUser, PublicWorkspace } from "~/lib/types";
+import type { PublicCompany, PublicInvitation, PublicNotification, PublicUser, PublicWorkspace } from "~/lib/types";
 
 export const Route = createFileRoute("/app")({
   loader: async () => {
@@ -47,6 +47,7 @@ export const Route = createFileRoute("/app")({
         company: null,
         workspaces: [],
         pendingInvitations: [],
+        notifications: [],
         plan: null,
       };
     }
@@ -73,9 +74,10 @@ export const Route = createFileRoute("/app")({
       }
     }
     const companyResult = await getMyCompany();
-    const [workspacesResult, invitesResult] = await Promise.all([
+    const [workspacesResult, invitesResult, notificationsResult] = await Promise.all([
       listWorkspaces(),
       listMyInvitations(),
+      listMyNotifications(),
     ]);
     return {
       setupRequired: false as const,
@@ -85,6 +87,7 @@ export const Route = createFileRoute("/app")({
       pendingInvitations: invitesResult.ok
         ? invitesResult.invitations.filter((i) => i.status === "invited")
         : [],
+      notifications: notificationsResult.ok ? notificationsResult.notifications : [],
       plan,
     };
   },
@@ -92,7 +95,7 @@ export const Route = createFileRoute("/app")({
 });
 
 function AppPage() {
-  const { setupRequired, user, company, workspaces, pendingInvitations, plan } =
+  const { setupRequired, user, company, workspaces, pendingInvitations, notifications, plan } =
     Route.useLoaderData();
   if (setupRequired || !user) {
     return (
@@ -121,12 +124,43 @@ function AppPage() {
         <div className="flex flex-col gap-6">
           <ProfileCard user={user} />
           <InvitationsCard pending={pendingInvitations} />
+          <NotificationsCard notifications={notifications} />
         </div>
       </div>
     </AppShell>
   );
 }
 
+// ------------------------------------------------------------- notifications
+function NotificationsCard({ notifications }: { notifications: PublicNotification[] }) {
+  const unread = notifications.filter((n) => !n.readAt).length;
+  return (
+    <Card className="p-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Notifications</h2>
+        {unread > 0 && <Badge tone="blue">{unread} unread</Badge>}
+      </div>
+      <p className="mt-1 text-sm text-muted">
+        Membership and billing updates from the ScaleBridge team.
+      </p>
+      {notifications.length === 0 ? (
+        <p className="mt-4 text-sm text-muted">No notifications yet.</p>
+      ) : (
+        <ul className="mt-4 divide-y divide-slate-100">
+          {notifications.slice(0, 5).map((n) => (
+            <li key={n.id} className="py-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold text-ink">{n.title}</p>
+                <span className="shrink-0 text-xs text-muted">{formatDate(n.createdAt)}</span>
+              </div>
+              {n.body && <p className="mt-1 text-sm text-muted">{n.body}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
 // ------------------------------------------------------ subscription banner
 function PlanBanner({ plan }: { plan: SubscriptionGate }) {
   const cancelled =

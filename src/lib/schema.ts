@@ -2856,6 +2856,55 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists commitment_overrides_sub_idx on commitment_overrides (subscription_id, created_at desc)`,
   `create index if not exists commitment_overrides_company_idx on commitment_overrides (company_id)`,
 
+  // --- entitlement_grants (Master Admin spec section 7): manual, admin-issued
+  // feature entitlements on top of (or in place of) plan-included features.
+  // grant_type: admin_grant = permanent manual grant; promotional = marketing
+  // / partnership promotion (optionally time-boxed); temporary = time-boxed
+  // access with an expiry. expires_at drives the active -> expired transition
+  // (the UI treats active rows with a past expires_at as Expired without a
+  // background job; a maintenance sweep can also flip status directly).
+  // effective_from in the future = scheduled grant (visible to the company
+  // owner, not yet active). status: active | expired | revoked. Rows are
+  // immutable after revocation (no delete policy). RLS: the company owner can
+  // always SELECT their own grants (never hidden from the client); only
+  // sb_admin can INSERT/UPDATE (the app server additionally gates on staff
+  // roles operations/finance/super_admin).
+  `create table if not exists entitlement_grants (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    subscription_id uuid references subscriptions(id) on delete set null,
+    entitlement_key text not null,
+    grant_type text not null default 'admin_grant'
+      check (grant_type in ('admin_grant','promotional','temporary')),
+    reason text not null,
+    granted_by uuid not null references users(id) on delete set null,
+    effective_from timestamptz not null default now(),
+    expires_at timestamptz,
+    status text not null default 'active' check (status in ('active','expired','revoked')),
+    created_at timestamptz not null default now()
+  )`,
+  `alter table entitlement_grants enable row level security`,
+  `alter table entitlement_grants force row level security`,
+  `drop policy if exists entitlement_grants_select on entitlement_grants`,
+  `create policy entitlement_grants_select on entitlement_grants for select using (
+    ${IS_ADMIN}
+    or exists (select 1 from companies co where co.id = entitlement_grants.company_id
+               and co.owner_id = ${UID})
+  )`,
+  `drop policy if exists entitlement_grants_insert on entitlement_grants`,
+  `create policy entitlement_grants_insert on entitlement_grants for insert with check (
+    ${IS_ADMIN}
+  )`,
+  `drop policy if exists entitlement_grants_update on entitlement_grants`,
+  `create policy entitlement_grants_update on entitlement_grants for update using (
+    ${IS_ADMIN}
+  ) with check (
+    ${IS_ADMIN}
+  )`,
+  `create index if not exists entitlement_grants_company_idx on entitlement_grants (company_id, created_at desc)`,
+  `create index if not exists entitlement_grants_sub_idx on entitlement_grants (subscription_id)`,
+  `create index if not exists entitlement_grants_key_idx on entitlement_grants (entitlement_key, status)`,
+
   // --- View as Client (Master Admin spec section 4): a temporary, audited,
   // admin-scoped support session that renders the client portal for one
   // company/client org. The token is a random secret (stored hashed, like

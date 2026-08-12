@@ -4,8 +4,6 @@
  * requiring verification, and a coverage indicator (verified providers per
  * service). Read-only, sb_admin only, RLS via asUser.
  */
-import type { Sql } from "postgres";
-
 export type AdminServiceInsightRow = {
   serviceId: string;
   serviceName: string;
@@ -25,7 +23,7 @@ export type AdminServiceInsights = {
   rows: AdminServiceInsightRow[];
 };
 
-export async function doGetAdminServiceInsights(tx: Sql): Promise<AdminServiceInsights> {
+export async function doGetAdminServiceInsights(tx: import("./db").Tx): Promise<AdminServiceInsights> {
   const [cats, rels] = await Promise.all([
     tx`select s.id as service_id, s.name as service_name, sc.name as category_name
        from services s

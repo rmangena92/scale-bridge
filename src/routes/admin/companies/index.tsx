@@ -346,7 +346,7 @@ function CompaniesPage() {
                     <Link
                       to="/admin/companies/$companyId"
                       params={{ companyId: c.id }}
-                      search={{}}
+                      search={{ notice: undefined }}
                       className="font-semibold text-navy hover:text-brand"
                     >
                       {c.name}

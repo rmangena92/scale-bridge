@@ -1000,9 +1000,6 @@ export async function doListViewAsClientConversations(
     const lastByKey = new Map(
       lastRows.map((r) => [`${r.workspace_id}::${r.thread_key}`, r]),
     );
-    const totalByKey = new Map(
-      threadRows.map((r) => [`${r.workspace_id}::${r.thread_key}`, r.total]),
-    );
     const conversations: ClientConversation[] = [];
     for (const w of wsRows) {
       const pushThread = (threadKey: string, type: string, entityId: string | null) => {
@@ -1144,6 +1141,7 @@ export async function doListViewAsClientMessages(input: {
         threadType: (["general", "milestone", "document", "issue", "variation", "invoice", "report", "package"] as const).includes(type as never)
           ? (type as import("./types").ClientMessage["threadType"])
           : "general",
+        entityId,
         entityTitle,
         messages,
         lastReadAt: null,

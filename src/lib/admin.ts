@@ -9,7 +9,7 @@
  * only here and never from client components.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { asService } from "./db";
+import { asUser } from "./db";
 import { doGetAdminServiceInsights } from "./admin-platform-core";
 import {
   doAddCaseMessage,

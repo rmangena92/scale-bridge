@@ -1558,6 +1558,19 @@ export const SCHEMA_SQL: string[] = [
   // lead contractors (e.g. the participating-businesses directory).
   `drop policy if exists service_categories_select on service_categories`,
   `create policy service_categories_select on service_categories for select using (${IS_ADMIN})`,
+  // Public landing page (plan item: refreshed landing site): the partner
+  // directory reads the live catalogue. Category names/descriptions are public
+  // marketing data; only services with a human-approved public status
+  // ('Listed' / 'Verified') are exposed. Admin sessions keep the unrestricted
+  // IS_ADMIN policy above (policies OR together), so admins still see every
+  // row. The landing server fn runs as the scalebridge_app connection role
+  // with no app.user_id / app.role context — hence `to scalebridge_app`.
+  `drop policy if exists service_categories_select_public on service_categories`,
+  `create policy service_categories_select_public on service_categories
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists services_select_public on services`,
+  `create policy services_select_public on services
+     for select to scalebridge_app using (status in ('Listed', 'Verified'))`,
   `drop policy if exists service_categories_insert on service_categories`,
   `create policy service_categories_insert on service_categories for insert with check (${IS_ADMIN})`,
   `drop policy if exists service_categories_update on service_categories`,

@@ -838,7 +838,7 @@ async function applyCheckoutCompleted(
       );
     }
     qs.push(
-      tx`insert into invoices (id, customer_id, subscription_id, invoice_number, amount_ael, tax_ael, total_ael, status, billing_period_start, billing_period_end, due_date, paid_at, provider_invoice_id)
+      tx`insert into subscription_invoices (id, customer_id, subscription_id, invoice_number, amount_ael, tax_ael, total_ael, status, billing_period_start, billing_period_end, due_date, paid_at, provider_invoice_id)
          values (${invoiceId}, ${sub.customer_id}, ${sub.id}, ${`SB-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`}, ${amount}, 0, ${amount}, 'Paid', ${periodStart}, ${periodEnd}, ${periodEnd}, ${now}, ${event.eventId})`,
     );
     qs.push(
@@ -927,7 +927,7 @@ async function applyInvoicePaymentSucceeded(
          values (${randomUUID()}, ${sub.id}, ${cycleNumber}, ${periodStart}, ${periodEnd}, 'Paid', ${amount}, ${now})`,
     );
     qs.push(
-      tx`insert into invoices (id, customer_id, subscription_id, invoice_number, amount_ael, tax_ael, total_ael, status, billing_period_start, billing_period_end, due_date, paid_at, provider_invoice_id)
+      tx`insert into subscription_invoices (id, customer_id, subscription_id, invoice_number, amount_ael, tax_ael, total_ael, status, billing_period_start, billing_period_end, due_date, paid_at, provider_invoice_id)
          values (${invoiceId}, ${sub.customer_id}, ${sub.id}, ${`SB-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`}, ${amount}, 0, ${amount}, 'Paid', ${periodStart}, ${periodEnd}, ${periodEnd}, ${now}, ${event.eventId})`,
     );
     qs.push(
@@ -971,7 +971,7 @@ async function applyInvoicePaymentFailed(
   const sub = subId ? await loadSubscription(actorId, role, subId) : null;
   if (!sub) throw new Error("Subscription not found for invoice.payment_failed.");
   const invRows = (await asUser(actorId, role, (tx) => [
-    tx`select id from invoices where subscription_id = ${sub.id} order by created_at desc limit 1`,
+    tx`select id from subscription_invoices where subscription_id = ${sub.id} order by created_at desc limit 1`,
   ]))[1] as { id: string }[];
   const invoiceId = invRows[0]?.id ?? null;
   await asUser(actorId, role, (tx) => {
@@ -982,7 +982,7 @@ async function applyInvoicePaymentFailed(
           where id = ${sub.id}`,
     );
     if (invoiceId) {
-      qs.push(tx`update invoices set status = 'Failed' where id = ${invoiceId}`);
+      qs.push(tx`update subscription_invoices set status = 'Failed' where id = ${invoiceId}`);
     }
     qs.push(
       tx`insert into payment_events (id, invoice_id, event_type, amount_ael, provider_event_id, occurred_at, raw)
@@ -1858,7 +1858,7 @@ export async function getBillingOverview(actorId: string, role: string): Promise
       tx`select f.entitlement_key as entitlement_key from feature_access_records f
           where f.subscription_id = ${subscription.id} and f.granted = true and (f.effective_to is null or f.effective_to > now())`,
       tx`select id, invoice_number, amount_ael, total_ael, status, billing_period_start, billing_period_end, paid_at
-           from invoices where customer_id = ${customer.id}
+           from subscription_invoices where customer_id = ${customer.id}
           order by created_at desc limit 12`,
       tx`select h.id, h.change_type, h.effective_date, h.billing_amount_ael, h.proration_amount_ael,
                 h.previous_plan_id, h.new_plan_id, h.payment_status, h.confirmation_status, h.source_event, h.details,
@@ -1986,7 +1986,7 @@ export async function listInvoices(
     const rows = (await asUser(actorId, role, (tx) => [
       tx`select id, invoice_number, amount_ael, tax_ael, total_ael, status,
                 billing_period_start, billing_period_end, due_date, paid_at
-           from invoices where customer_id = ${customer.id}
+           from subscription_invoices where customer_id = ${customer.id}
           order by created_at desc limit 50`,
     ]))[1] as {
       id: string; invoice_number: string; amount_ael: string | number; tax_ael: string | number;

@@ -2263,7 +2263,7 @@ export const SCHEMA_SQL: string[] = [
     is_default boolean not null default false,
     created_at timestamptz not null default now()
   )`,
-  `create table if not exists invoices (
+  `create table if not exists subscription_invoices (
     id uuid primary key default gen_random_uuid(),
     customer_id uuid not null references customers(id) on delete cascade,
     subscription_id uuid references subscriptions(id) on delete set null,
@@ -2281,7 +2281,7 @@ export const SCHEMA_SQL: string[] = [
   )`,
   `create table if not exists payment_events (
     id uuid primary key default gen_random_uuid(),
-    invoice_id uuid references invoices(id) on delete cascade,
+    invoice_id uuid references subscription_invoices(id) on delete cascade,
     event_type text not null check (event_type in ('payment_succeeded','payment_failed','refunded')),
     amount_ael numeric(12,2),
     provider_event_id text,
@@ -2365,8 +2365,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table cancellation_requests force row level security`,
   `alter table payment_methods enable row level security`,
   `alter table payment_methods force row level security`,
-  `alter table invoices enable row level security`,
-  `alter table invoices force row level security`,
+  `alter table subscription_invoices enable row level security`,
+  `alter table subscription_invoices force row level security`,
   `alter table payment_events enable row level security`,
   `alter table payment_events force row level security`,
   `alter table billing_provider_webhook_events enable row level security`,
@@ -2626,50 +2626,50 @@ export const SCHEMA_SQL: string[] = [
     exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
-  `drop policy if exists invoices_select on invoices`,
-  `create policy invoices_select on invoices for select using (
-    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  `drop policy if exists invoices_select on subscription_invoices`,
+  `create policy invoices_select on subscription_invoices for select using (
+    exists (select 1 from customers c where c.id = subscription_invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
-  `drop policy if exists invoices_insert on invoices`,
-  `create policy invoices_insert on invoices for insert with check (
-    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  `drop policy if exists invoices_insert on subscription_invoices`,
+  `create policy invoices_insert on subscription_invoices for insert with check (
+    exists (select 1 from customers c where c.id = subscription_invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
-  `drop policy if exists invoices_update on invoices`,
-  `create policy invoices_update on invoices for update using (
-    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  `drop policy if exists invoices_update on subscription_invoices`,
+  `create policy invoices_update on subscription_invoices for update using (
+    exists (select 1 from customers c where c.id = subscription_invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   ) with check (
-    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    exists (select 1 from customers c where c.id = subscription_invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
-  `drop policy if exists invoices_delete on invoices`,
-  `create policy invoices_delete on invoices for delete using (
-    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  `drop policy if exists invoices_delete on subscription_invoices`,
+  `create policy invoices_delete on subscription_invoices for delete using (
+    exists (select 1 from customers c where c.id = subscription_invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
   `drop policy if exists payment_events_select on payment_events`,
   `create policy payment_events_select on payment_events for select using (
-    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
   `drop policy if exists payment_events_insert on payment_events`,
   `create policy payment_events_insert on payment_events for insert with check (
-    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
   `drop policy if exists payment_events_update on payment_events`,
   `create policy payment_events_update on payment_events for update using (
-    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   ) with check (
-    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
   `drop policy if exists payment_events_delete on payment_events`,
   `create policy payment_events_delete on payment_events for delete using (
-    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
   )`,
   `drop policy if exists subscription_history_select on subscription_history`,
@@ -2767,8 +2767,8 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists downgrade_requests_sub_idx on downgrade_requests (subscription_id)`,
   `create index if not exists cancellation_requests_sub_idx on cancellation_requests (subscription_id)`,
   `create index if not exists payment_methods_customer_idx on payment_methods (customer_id)`,
-  `create index if not exists invoices_customer_idx on invoices (customer_id)`,
-  `create index if not exists invoices_sub_idx on invoices (subscription_id)`,
+  `create index if not exists subscription_invoices_customer_idx on subscription_invoices (customer_id)`,
+  `create index if not exists subscription_invoices_sub_idx on subscription_invoices (subscription_id)`,
   `create index if not exists payment_events_invoice_idx on payment_events (invoice_id)`,
   `create index if not exists webhook_events_received_idx on billing_provider_webhook_events (received_at desc)`,
   `create index if not exists subscription_history_sub_idx on subscription_history (subscription_id, created_at desc)`,

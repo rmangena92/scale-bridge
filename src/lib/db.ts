@@ -52,7 +52,16 @@ export function ensureSchema(): Promise<void> {
       // multi-statement string is fine. SCHEMA_SQL statements are individually
       // idempotent (IF NOT EXISTS / DROP POLICY IF EXISTS), so re-running after
       // a partial failure is safe.
-      await getPg().unsafe(SCHEMA_SQL.join(";\n"));
+      // The whole run executes inside a transaction with app.role='sb_admin' so
+      // the idempotent default-row INSERTs (workspace_fee_tiers,
+      // success_fee_caps, platform_settings, landing_content) pass their FORCE
+      // RLS insert policies — on a bare connection (no app.role) those inserts
+      // are denied and every ensureSchema() caller would fail. The set_config
+      // is transaction-scoped, so no RLS context leaks to later queries.
+      await getPg().begin(async (tx) => {
+        await tx`select set_config('app.role', 'sb_admin', true)`;
+        await tx.unsafe(SCHEMA_SQL.join(";\n"));
+      });
     })().catch((err) => {
       schemaPromise = null;
       throw err;

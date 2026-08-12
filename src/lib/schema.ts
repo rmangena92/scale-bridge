@@ -663,6 +663,105 @@ export const SCHEMA_SQL: string[] = [
   )`,
 
   // ------------------------------------------------------------------
+  // AI Service Intelligence agent (plan item 5). The agent is a
+  // recommendation-mode, evidence-based service-discovery engine: it reads
+  // approved internal data (and approved public sources only when the company
+  // has granted consent), extracts evidence, maps it to catalogue services,
+  // and records ai_recommendations — it never modifies a company profile and
+  // never contacts a business. Every AI record carries created_at, source,
+  // agent_version, confidence, review_status, reviewed_by/at and a final
+  // decision. RLS mirrors the catalogue tables: sb_admin only.
+  // ------------------------------------------------------------------
+  `create table if not exists ai_agent_runs (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    trigger text not null
+      check (trigger in ('profile_update','intake','uploaded_document','contract_participation','manual','manual_re-run')),
+    status text not null default 'queued'
+      check (status in ('queued','running','completed','failed')),
+    agent_version text not null default '0.1.0',
+    prompt_model text,
+    started_at timestamptz,
+    finished_at timestamptz,
+    error text,
+    run_metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists ai_recommendations (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    run_id uuid references ai_agent_runs(id) on delete set null,
+    service_id uuid references services(id) on delete set null,
+    recommendation_type text not null
+      check (recommendation_type in ('service_discovery','upsell','cross-sell','profile_update')),
+    status text not null default 'Suggested'
+      check (status in ('Suggested','Under_Review','Approved','Rejected','Added_To_Profile','Expired')),
+    confidence text not null default 'Requires_Manual_Review'
+      check (confidence in ('High','Medium','Low','Requires_Manual_Review')),
+    confidence_score numeric not null default 0,
+    summary text not null,
+    rationale text,
+    source text not null default 'internal_data',
+    created_at timestamptz not null default now(),
+    reviewed_by uuid references users(id) on delete set null,
+    reviewed_at timestamptz,
+    admin_notes text
+  )`,
+  `create table if not exists upsell_opportunities (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    existing_service_id uuid references services(id) on delete set null,
+    suggested_service_id uuid not null references services(id) on delete set null,
+    relationship text,
+    evidence text,
+    confidence text not null default 'Requires_Manual_Review'
+      check (confidence in ('High','Medium','Low','Requires_Manual_Review')),
+    confidence_score numeric not null default 0,
+    relevant_opportunities jsonb not null default '[]'::jsonb,
+    suggested_message text,
+    timing text,
+    owner_id uuid references users(id) on delete set null,
+    status text not null default 'Suggested'
+      check (status in ('Suggested','Under_Review','Approved','Rejected','Awaiting_Company_Confirmation','Sent','Interested','Declined','Converted','Closed')),
+    admin_notes text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists ai_data_source_permissions (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null references companies(id) on delete cascade,
+    source text not null
+      check (source in ('internal_data','website','public_source')),
+    granted boolean not null default false,
+    consent_tracking text,
+    consent_ref text,
+    granted_at timestamptz,
+    granted_by uuid references users(id) on delete set null,
+    created_at timestamptz not null default now(),
+    unique (company_id, source)
+  )`,
+  `create table if not exists company_ai_preferences (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid not null unique references companies(id) on delete cascade,
+    ai_discovery_enabled boolean not null default true,
+    public_source_consent boolean not null default false,
+    opt_out boolean not null default false,
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists ai_audit_events (
+    id uuid primary key default gen_random_uuid(),
+    run_id uuid references ai_agent_runs(id) on delete set null,
+    actor_type text not null
+      check (actor_type in ('agent','admin','system')),
+    actor_id text,
+    action text not null,
+    entity_type text,
+    entity_id text,
+    details jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
+  )`,
+
+  // ------------------------------------------------------------------
   // Indexes
   // ------------------------------------------------------------------
   `create index if not exists sessions_token_hash_idx on sessions (token_hash)`,
@@ -803,6 +902,18 @@ export const SCHEMA_SQL: string[] = [
   `alter table services force row level security`,
   `alter table company_services force row level security`,
   `alter table service_evidence force row level security`,
+  `alter table ai_agent_runs enable row level security`,
+  `alter table ai_recommendations enable row level security`,
+  `alter table upsell_opportunities enable row level security`,
+  `alter table ai_data_source_permissions enable row level security`,
+  `alter table company_ai_preferences enable row level security`,
+  `alter table ai_audit_events enable row level security`,
+  `alter table ai_agent_runs force row level security`,
+  `alter table ai_recommendations force row level security`,
+  `alter table upsell_opportunities force row level security`,
+  `alter table ai_data_source_permissions force row level security`,
+  `alter table company_ai_preferences force row level security`,
+  `alter table ai_audit_events force row level security`,
 
   // --- profiles: users manage their own profile; sb_admin manages all ----
   `drop policy if exists profiles_select on profiles`,
@@ -1477,6 +1588,59 @@ export const SCHEMA_SQL: string[] = [
   `create policy service_evidence_update on service_evidence for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
   `drop policy if exists service_evidence_delete on service_evidence`,
   `create policy service_evidence_delete on service_evidence for delete using (${IS_ADMIN})`,
+  // --- AI agent tables: internal ScaleBridge data — admins only (mirrors
+  // company_notes / catalogue). ai_agent_runs / ai_recommendations /
+  // upsell_opportunities / ai_data_source_permissions /
+  // company_ai_preferences / ai_audit_events are never visible to companies
+  // or clients at the RLS layer; the server decides what later phases expose.
+  `drop policy if exists ai_agent_runs_select on ai_agent_runs`,
+  `create policy ai_agent_runs_select on ai_agent_runs for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_agent_runs_insert on ai_agent_runs`,
+  `create policy ai_agent_runs_insert on ai_agent_runs for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_agent_runs_update on ai_agent_runs`,
+  `create policy ai_agent_runs_update on ai_agent_runs for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_agent_runs_delete on ai_agent_runs`,
+  `create policy ai_agent_runs_delete on ai_agent_runs for delete using (${IS_ADMIN})`,
+  `drop policy if exists ai_recommendations_select on ai_recommendations`,
+  `create policy ai_recommendations_select on ai_recommendations for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_recommendations_insert on ai_recommendations`,
+  `create policy ai_recommendations_insert on ai_recommendations for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_recommendations_update on ai_recommendations`,
+  `create policy ai_recommendations_update on ai_recommendations for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_recommendations_delete on ai_recommendations`,
+  `create policy ai_recommendations_delete on ai_recommendations for delete using (${IS_ADMIN})`,
+  `drop policy if exists upsell_opportunities_select on upsell_opportunities`,
+  `create policy upsell_opportunities_select on upsell_opportunities for select using (${IS_ADMIN})`,
+  `drop policy if exists upsell_opportunities_insert on upsell_opportunities`,
+  `create policy upsell_opportunities_insert on upsell_opportunities for insert with check (${IS_ADMIN})`,
+  `drop policy if exists upsell_opportunities_update on upsell_opportunities`,
+  `create policy upsell_opportunities_update on upsell_opportunities for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists upsell_opportunities_delete on upsell_opportunities`,
+  `create policy upsell_opportunities_delete on upsell_opportunities for delete using (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_permissions_select on ai_data_source_permissions`,
+  `create policy ai_data_source_permissions_select on ai_data_source_permissions for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_permissions_insert on ai_data_source_permissions`,
+  `create policy ai_data_source_permissions_insert on ai_data_source_permissions for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_permissions_update on ai_data_source_permissions`,
+  `create policy ai_data_source_permissions_update on ai_data_source_permissions for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_permissions_delete on ai_data_source_permissions`,
+  `create policy ai_data_source_permissions_delete on ai_data_source_permissions for delete using (${IS_ADMIN})`,
+  `drop policy if exists company_ai_preferences_select on company_ai_preferences`,
+  `create policy company_ai_preferences_select on company_ai_preferences for select using (${IS_ADMIN})`,
+  `drop policy if exists company_ai_preferences_insert on company_ai_preferences`,
+  `create policy company_ai_preferences_insert on company_ai_preferences for insert with check (${IS_ADMIN})`,
+  `drop policy if exists company_ai_preferences_update on company_ai_preferences`,
+  `create policy company_ai_preferences_update on company_ai_preferences for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists company_ai_preferences_delete on company_ai_preferences`,
+  `create policy company_ai_preferences_delete on company_ai_preferences for delete using (${IS_ADMIN})`,
+  `drop policy if exists ai_audit_events_select on ai_audit_events`,
+  `create policy ai_audit_events_select on ai_audit_events for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_audit_events_insert on ai_audit_events`,
+  `create policy ai_audit_events_insert on ai_audit_events for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_audit_events_update on ai_audit_events`,
+  `create policy ai_audit_events_update on ai_audit_events for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_audit_events_delete on ai_audit_events`,
+  `create policy ai_audit_events_delete on ai_audit_events for delete using (${IS_ADMIN})`,
   // ------------------------------------------------------------------
   // Portal-phase policies (Admin + Client portals).
   //
@@ -1928,4 +2092,13 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists company_services_company_idx on company_services (company_id)`,
   `create index if not exists company_services_service_idx on company_services (service_id)`,
   `create index if not exists service_evidence_company_service_idx on service_evidence (company_service_id)`,
+  // AI agent indexes (plan item 5).
+  `create index if not exists ai_agent_runs_company_idx on ai_agent_runs (company_id)`,
+  `create index if not exists ai_agent_runs_status_idx on ai_agent_runs (status)`,
+  `create index if not exists ai_recommendations_company_idx on ai_recommendations (company_id)`,
+  `create index if not exists ai_recommendations_status_idx on ai_recommendations (status)`,
+  `create index if not exists upsell_opportunities_company_idx on upsell_opportunities (company_id)`,
+  `create index if not exists upsell_opportunities_status_idx on upsell_opportunities (status)`,
+  `create index if not exists ai_audit_events_run_idx on ai_audit_events (run_id)`,
+  `create index if not exists ai_audit_events_created_idx on ai_audit_events (created_at desc)`,
 ];

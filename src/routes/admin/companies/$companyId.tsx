@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { enterViewAsClient } from "~/lib/admin-view";
 import {
   createAdminCompanyNote,
   getAdminCompanyDetail,
@@ -39,6 +40,9 @@ import {
 } from "~/components/ui";
 
 export const Route = createFileRoute("/admin/companies/$companyId")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    notice: typeof search.notice === "string" ? search.notice : undefined,
+  }),
   loader: async ({ params }) => {
     const session = await getAdminSession();
     const [detail, rels, sub] = await Promise.all([
@@ -178,6 +182,13 @@ function CompanyDetailBody({
     useState<CompanyServiceRow[]>(initialRelationships);
   const [relationshipsError, setRelationshipsError] =
     useState<string | null>(initialRelationshipsError);
+  const navigate = useNavigate();
+  const search = Route.useSearch();
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [viewReason, setViewReason] = useState("");
+  const [viewOrg, setViewOrg] = useState<string | undefined>(undefined);
+  const [viewBusy, setViewBusy] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
 
   function guard(): boolean {
     if (!adminCanMutate) {
@@ -218,9 +229,42 @@ function CompanyDetailBody({
   }
 
   const c = detail.company;
-
+  const notice = search.notice;
+  async function openViewAsClient(orgId: string | undefined) {
+    const reason = viewReason.trim();
+    if (reason.length < 3) {
+      setViewError("Please enter a reason (a few words) for viewing as client.");
+      return;
+    }
+    setViewBusy(true);
+    setViewError(null);
+    const result = await enterViewAsClient({
+      data: { companyId: c.id, reason, orgId: orgId ?? null },
+    });
+    setViewBusy(false);
+    if (result.ok) {
+      setShowViewModal(false);
+      setViewReason("");
+      setViewOrg(undefined);
+      await navigate({
+        to: "/admin/companies/$companyId/view-as-client",
+        params: { companyId: c.id },
+      });
+    } else {
+      setViewError(result.error);
+    }
+  }
   return (
     <div>
+      {notice && (
+        <div className="mb-5 rounded-lg border border-teal/40 bg-teal/10 px-3 py-2 text-sm font-medium text-navy">
+          {notice === "view-expired"
+            ? "Your View as Client session expired after 20 minutes and was closed automatically. The expiry is recorded in the audit log."
+            : notice === "view-exited"
+              ? "You exited the View as Client session. Entry and exit are recorded in the audit log."
+              : "The View as Client session is no longer active."}
+        </div>
+      )}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm font-bold uppercase tracking-widest text-teal">Companies</p>
@@ -230,9 +274,22 @@ function CompanyDetailBody({
           </div>
           <p className="mt-1 text-sm text-muted">{c.type ?? "-"}</p>
         </div>
-        <Link to="/admin/companies" className="text-sm font-semibold text-brand hover:underline">
-          ← Back to companies
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setViewOrg(undefined);
+              setViewError(null);
+              setShowViewModal(true);
+            }}
+          >
+            View as Client
+          </Button>
+          <Link to="/admin/companies" className="text-sm font-semibold text-brand hover:underline">
+            Back to companies
+          </Link>
+        </div>
       </div>
 
       {error && (
@@ -278,7 +335,16 @@ function CompanyDetailBody({
       {tab === "evidence" && <EvidenceTab relationships={relationships} />}
       {tab === "contracts" && <ContractsTab detail={detail} />}
       {tab === "workspaces" && <WorkspacesTab detail={detail} />}
-      {tab === "client-portals" && <ClientPortalsTab detail={detail} />}
+      {tab === "client-portals" && (
+        <ClientPortalsTab
+          detail={detail}
+          onView={(orgId: string) => {
+            setViewOrg(orgId);
+            setViewError(null);
+            setShowViewModal(true);
+          }}
+        />
+      )}
       {tab === "opportunities" && (
         <CatalogueEmptyState
           title="Opportunities"
@@ -308,6 +374,68 @@ function CompanyDetailBody({
       )}
       {tab === "activity" && <ActivityTab detail={detail} />}
       {tab === "notes" && <NotesTab detail={detail} adminCanMutate={adminCanMutate} />}
+
+      {showViewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-widest text-amber">View as Client</p>
+                <h2 className="mt-1 text-xl font-bold">Temporary client portal view</h2>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-2 py-1 text-sm font-semibold text-muted hover:bg-mist"
+                onClick={() => setShowViewModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-muted">
+              Opens a read-only view of the client portal for this company, exactly as the client
+              sees it. Your identity stays visible in a banner on every page, the view expires
+              automatically after 20 minutes, and the whole session is recorded in the audit log.
+            </p>
+            <form
+              onSubmit={(e: FormEvent) => {
+                e.preventDefault();
+                void openViewAsClient(viewOrg);
+              }}
+              className="mt-4"
+            >
+              <label htmlFor="view-reason" className="text-xs font-bold uppercase tracking-wider text-muted">
+                Reason (required)
+              </label>
+              <textarea
+                id="view-reason"
+                value={viewReason}
+                onChange={(e) => setViewReason(e.target.value)}
+                rows={3}
+                className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                placeholder="e.g. Support ticket #123 - investigating invoice display issue"
+              />
+              {viewError && <p className="mt-2 text-sm text-danger">{viewError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowViewModal(false);
+                    setViewReason("");
+                    setViewError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={viewBusy}>
+                  {viewBusy ? "Opening..." : "Enter client view"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -617,7 +745,13 @@ function WorkspacesTab({ detail }: { detail: AdminCompanyDetail }) {
   );
 }
 
-function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
+function ClientPortalsTab({
+  detail,
+  onView,
+}: {
+  detail: AdminCompanyDetail;
+  onView: (orgId: string) => void;
+}) {
   const portals = detail.clientPortals;
   return (
     <div>
@@ -640,6 +774,7 @@ function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
                 <th className="px-3 py-3">Members</th>
                 <th className="px-3 py-3">Contracts</th>
                 <th className="px-5 py-3">Last activity</th>
+                <th className="px-5 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -663,6 +798,11 @@ function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
                     )}
                   </td>
                   <td className="px-5 py-3 text-muted">{o.lastActivity ? new Date(o.lastActivity).toLocaleString() : "-"}</td>
+                  <td className="px-5 py-3">
+                    <Button variant="secondary" size="sm" onClick={() => onView(o.id)}>
+                      View as Client
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -75,6 +75,7 @@ import { Route as AdminServicesCategoriesRouteImport } from './routes/admin/serv
 import { Route as AdminServicesServiceIdRouteImport } from './routes/admin/services/$serviceId'
 import { Route as AdminContractsWorkspaceIdRouteImport } from './routes/admin/contracts/$workspaceId'
 import { Route as AdminCompaniesCompanyIdRouteImport } from './routes/admin/companies/$companyId'
+import { Route as AdminCompaniesCompanyIdViewAsClientRouteImport } from './routes/admin/companies/$companyId/view-as-client'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
@@ -409,6 +410,12 @@ const AdminCompaniesCompanyIdRoute = AdminCompaniesCompanyIdRouteImport.update({
   path: '/$companyId',
   getParentRoute: () => AdminCompaniesRoute,
 } as any)
+const AdminCompaniesCompanyIdViewAsClientRoute =
+  AdminCompaniesCompanyIdViewAsClientRouteImport.update({
+    id: '/view-as-client',
+    path: '/view-as-client',
+    getParentRoute: () => AdminCompaniesCompanyIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -461,7 +468,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
-  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
@@ -477,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
+  '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -520,7 +528,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/client': typeof ClientIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
-  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
@@ -536,6 +544,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersIndexRoute
   '/admin/verification': typeof AdminVerificationIndexRoute
   '/client/contracts': typeof ClientContractsIndexRoute
+  '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -589,7 +598,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
-  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
@@ -605,6 +614,7 @@ export interface FileRoutesById {
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
+  '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -675,6 +685,7 @@ export interface FileRouteTypes {
     | '/admin/users/'
     | '/admin/verification/'
     | '/client/contracts/'
+    | '/admin/companies/$companyId/view-as-client'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -734,6 +745,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/admin/verification'
     | '/client/contracts'
+    | '/admin/companies/$companyId/view-as-client'
   id:
     | '__root__'
     | '/'
@@ -802,6 +814,7 @@ export interface FileRouteTypes {
     | '/admin/users/'
     | '/admin/verification/'
     | '/client/contracts/'
+    | '/admin/companies/$companyId/view-as-client'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1284,16 +1297,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCompaniesCompanyIdRouteImport
       parentRoute: typeof AdminCompaniesRoute
     }
+    '/admin/companies/$companyId/view-as-client': {
+      id: '/admin/companies/$companyId/view-as-client'
+      path: '/view-as-client'
+      fullPath: '/admin/companies/$companyId/view-as-client'
+      preLoaderRoute: typeof AdminCompaniesCompanyIdViewAsClientRouteImport
+      parentRoute: typeof AdminCompaniesCompanyIdRoute
+    }
   }
 }
 
+interface AdminCompaniesCompanyIdRouteChildren {
+  AdminCompaniesCompanyIdViewAsClientRoute: typeof AdminCompaniesCompanyIdViewAsClientRoute
+}
+
+const AdminCompaniesCompanyIdRouteChildren: AdminCompaniesCompanyIdRouteChildren =
+  {
+    AdminCompaniesCompanyIdViewAsClientRoute:
+      AdminCompaniesCompanyIdViewAsClientRoute,
+  }
+
+const AdminCompaniesCompanyIdRouteWithChildren =
+  AdminCompaniesCompanyIdRoute._addFileChildren(
+    AdminCompaniesCompanyIdRouteChildren,
+  )
+
 interface AdminCompaniesRouteChildren {
-  AdminCompaniesCompanyIdRoute: typeof AdminCompaniesCompanyIdRoute
+  AdminCompaniesCompanyIdRoute: typeof AdminCompaniesCompanyIdRouteWithChildren
   AdminCompaniesIndexRoute: typeof AdminCompaniesIndexRoute
 }
 
 const AdminCompaniesRouteChildren: AdminCompaniesRouteChildren = {
-  AdminCompaniesCompanyIdRoute: AdminCompaniesCompanyIdRoute,
+  AdminCompaniesCompanyIdRoute: AdminCompaniesCompanyIdRouteWithChildren,
   AdminCompaniesIndexRoute: AdminCompaniesIndexRoute,
 }
 

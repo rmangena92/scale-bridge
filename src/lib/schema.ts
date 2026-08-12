@@ -2812,5 +2812,39 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists subscription_history_sub_idx on subscription_history (subscription_id, created_at desc)`,
   `create index if not exists feature_access_sub_idx on feature_access_records (subscription_id)`,
   `create index if not exists entitlement_audit_sub_idx on entitlement_audit_logs (subscription_id)`,
-
+  // --- View as Client (Master Admin spec section 4): a temporary, audited,
+  // admin-scoped support session that renders the client portal for one
+  // company/client org. The token is a random secret (stored hashed, like
+  // sessions), expires after 20 minutes, and is invalidated on exit or expiry.
+  // RLS: sb_admin only. The row is created/read/closed exclusively by admin
+  // server functions running inside asUser(admin, 'sb_admin').
+  `create table if not exists admin_view_sessions (
+    id uuid primary key default gen_random_uuid(),
+    token_hash text not null unique,
+    admin_user_id uuid not null references users(id) on delete cascade,
+    company_id uuid not null references companies(id) on delete cascade,
+    client_org_id uuid references client_organizations(id) on delete cascade,
+    reason text not null,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null,
+    ended_at timestamptz
+  )`,
+  `alter table admin_view_sessions enable row level security`,
+  `alter table admin_view_sessions force row level security`,
+  `drop policy if exists admin_view_sessions_select on admin_view_sessions`,
+  `create policy admin_view_sessions_select on admin_view_sessions for select using (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists admin_view_sessions_insert on admin_view_sessions`,
+  `create policy admin_view_sessions_insert on admin_view_sessions for insert with check (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists admin_view_sessions_update on admin_view_sessions`,
+  `create policy admin_view_sessions_update on admin_view_sessions for update using (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `create index if not exists admin_view_sessions_token_idx on admin_view_sessions (token_hash)`,
+  `create index if not exists admin_view_sessions_admin_idx on admin_view_sessions (admin_user_id, created_at desc)`,
 ];

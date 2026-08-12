@@ -124,7 +124,7 @@ export async function doAdminListCompanyEntitlements(
     const company = await loadCompanyAndOwner(admin.id, companyId);
     if (!company) return { ok: false, error: "Company not found." };
     const sub = await loadCompanySubscription(admin.id, companyId);
-    const [, planRows, grantRows, legacyRows, planNameRows] = (await asUser(
+    const [, , planRows, grantRows, legacyRows, planNameRows] = (await asUser(
       admin.id,
       "sb_admin",
       (tx) => [
@@ -146,7 +146,7 @@ export async function doAdminListCompanyEntitlements(
             order by f.created_at desc limit 200`,
         tx`select p.name from membership_plans p where p.id = ${sub?.plan_id ?? null} limit 1`,
       ],
-    )) as [unknown, Record<string, unknown>[], CompanyEntitlementRow[], unknown[], { name: string | null }[]];
+    )) as [unknown, unknown, Record<string, unknown>[], CompanyEntitlementRow[], unknown[], { name: string | null }[]];
     const planKeys = new Set((planRows as { entitlement_key: string }[]).map((r) => r.entitlement_key));
     const now = Date.now();
     const rows: CompanyEntitlementRow[] = [];

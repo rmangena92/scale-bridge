@@ -685,9 +685,21 @@ export async function doListCompanyServices(
            select cs2.id from company_services cs2 where cs2.company_id = ${companyId}
          )
          order by se.created_at desc`,
+      tx`select uo.suggested_service_id as service_id, uo.id, uo.status, uo.confidence,
+                uo.relationship, uo.evidence, null::text as summary, uo.created_at,
+                'upsell' as kind
+         from upsell_opportunities uo
+         where uo.company_id = ${companyId}
+         union all
+         select ar.service_id as service_id, ar.id, ar.status, ar.confidence,
+                null::text as relationship, ar.rationale as evidence, ar.summary,
+                ar.created_at, 'ai' as kind
+         from ai_recommendations ar
+         where ar.company_id = ${companyId}
+         order by created_at desc`,
     ]);
-    const relRows = rows[1] as unknown[];
-    const evRows = rows[2] as {
+    const relRows = rows[0] as unknown[];
+    const evRows = rows[1] as {
       id: string;
       company_service_id: string;
       evidence_type: string | null;
@@ -699,7 +711,7 @@ export async function doListCompanyServices(
       created_at: string;
     }[];
 
-    const oppRows = rows[3] as {
+    const oppRows = rows[2] as {
       id: string;
       service_id: string;
       status: string;

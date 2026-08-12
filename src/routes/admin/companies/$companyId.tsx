@@ -145,6 +145,8 @@ function CompanyDetailPage() {
       detail={detail}
       relationships={relationships}
       relationshipsError={relationshipsError}
+      subscription={subscription}
+      subscriptionError={subscriptionError}
     />
   );
 }
@@ -153,11 +155,15 @@ function CompanyDetailBody({
   detail,
   relationships: initialRelationships,
   relationshipsError: initialRelationshipsError,
+  subscription,
+  subscriptionError,
 }: {
   adminCanMutate: boolean;
   detail: AdminCompanyDetail;
   relationships: CompanyServiceRow[];
   relationshipsError: string | null;
+  subscription: AdminCompanySubscriptionDetail | null;
+  subscriptionError: string | null;
 }) {
   const [status, setStatus] = useState(detail.company.verificationStatus);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -323,6 +329,7 @@ function OverviewTab({
   adminCanMutate,
   busy,
   onTab,
+  subscription,
 }: {
   detail: AdminCompanyDetail;
   status: string;
@@ -1159,7 +1166,6 @@ function fmtAed(v: number | null | undefined): string {
   return `AED ${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function MembershipTab({
-  detail,
   subscription,
 }: {
   detail: AdminCompanyDetail;
@@ -1346,7 +1352,7 @@ function SubscriptionTab({
             <ul className="divide-y divide-slate-100">
               {subscription.webhooks.slice(0, 12).map((w) => (
                 <li key={w.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="font-medium text-ink">{w.event_type}</span>
+                  <span className="font-medium text-ink">{w.eventType}</span>
                   <span className="text-xs text-muted">{w.processed ? "processed" : "unprocessed"} · {fmtDate2(w.receivedAt)}</span>
                 </li>
               ))}
@@ -1377,7 +1383,6 @@ function SubscriptionTab({
 
 // ------------------------------------------------- Feature Entitlements
 function EntitlementsTab({
-  detail,
   subscription,
 }: {
   detail: AdminCompanyDetail;

@@ -11,7 +11,7 @@
 import { asUser, dbConfigured, ensureSchema } from "./db";
 import { loadAdminUser } from "./auth-core";
 import { STATUS_DISPLAY } from "./subscriptions";
-import type { BillingInterval, SubscriptionStatus } from "./subscriptions";
+import type { BillingInterval, EntitlementValue, SubscriptionStatus } from "./subscriptions";
 
 // ------------------------------------------------------------- result types
 export type AdminSubscriptionRow = {
@@ -56,7 +56,7 @@ export type AdminSubscriptionListResult =
 export type AdminEntitlementView = {
   key: string;
   label: string;
-  value: unknown;
+  value: EntitlementValue | null;
   source: "plan" | "manual";
   granted: boolean;
   effectiveFrom: string | null;
@@ -626,7 +626,7 @@ export async function doGetAdminCompanySubscription(
     }));
     const planEntitlements: AdminEntitlementView[] = (d[11] as {
       entitlement_key: string;
-      value: unknown;
+      value: EntitlementValue;
     }[]).map((r) => ({
       key: r.entitlement_key,
       label: entitlementLabel(r.entitlement_key),

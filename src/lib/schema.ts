@@ -2653,24 +2653,54 @@ export const SCHEMA_SQL: string[] = [
   `create policy payment_events_select on payment_events for select using (
     exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or (
+      payment_events.invoice_id is null
+      and exists (select 1 from subscriptions s
+                   where s.id = (payment_events.raw->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
   )`,
   `drop policy if exists payment_events_insert on payment_events`,
   `create policy payment_events_insert on payment_events for insert with check (
     exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or (
+      payment_events.invoice_id is null
+      and exists (select 1 from subscriptions s
+                   where s.id = (payment_events.raw->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
   )`,
   `drop policy if exists payment_events_update on payment_events`,
   `create policy payment_events_update on payment_events for update using (
     exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or (
+      payment_events.invoice_id is null
+      and exists (select 1 from subscriptions s
+                   where s.id = (payment_events.raw->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
   ) with check (
     exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or (
+      payment_events.invoice_id is null
+      and exists (select 1 from subscriptions s
+                   where s.id = (payment_events.raw->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
   )`,
   `drop policy if exists payment_events_delete on payment_events`,
   `create policy payment_events_delete on payment_events for delete using (
     exists (select 1 from subscription_invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
     or nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or (
+      payment_events.invoice_id is null
+      and exists (select 1 from subscriptions s
+                   where s.id = (payment_events.raw->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
   )`,
   `drop policy if exists subscription_history_select on subscription_history`,
   `create policy subscription_history_select on subscription_history for select using (
@@ -2750,7 +2780,15 @@ export const SCHEMA_SQL: string[] = [
   // signature-verified before anything reaches the DB. Read is sb_admin only
   // (internal events never visible to tenants).
   `drop policy if exists billing_provider_webhook_events_select on billing_provider_webhook_events`,
-  `create policy billing_provider_webhook_events_select on billing_provider_webhook_events for select using (${IS_ADMIN})`,
+  `create policy billing_provider_webhook_events_select on billing_provider_webhook_events for select using (
+    ${IS_ADMIN}
+    or (
+      billing_provider_webhook_events.payload->>'subscriptionId' is not null
+      and exists (select 1 from subscriptions s
+                   where s.id = (billing_provider_webhook_events.payload->>'subscriptionId')::uuid
+                     and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    )
+  )`,
   `drop policy if exists billing_provider_webhook_events_insert on billing_provider_webhook_events`,
   `create policy billing_provider_webhook_events_insert on billing_provider_webhook_events for insert with check (true)`,
   `drop policy if exists billing_provider_webhook_events_update on billing_provider_webhook_events`,

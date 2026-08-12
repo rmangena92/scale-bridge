@@ -741,14 +741,14 @@ function grantEntitlementsQueries(
   );
   qs.push(
     tx`insert into feature_access_records (id, company_id, subscription_id, entitlement_key, granted, effective_from, effective_to)
-       select ${randomUUID()}, ${companyId}, ${subscriptionId}, e.entitlement_key, true, ${effectiveFrom}, null
+       select gen_random_uuid(), ${companyId}, ${subscriptionId}, e.entitlement_key, true, ${effectiveFrom}, null
          from plan_entitlements e
         where e.plan_id = ${planId}
        on conflict do nothing`,
   );
   qs.push(
     tx`insert into entitlement_audit_logs (id, company_id, subscription_id, actor_user_id, action, entitlement_key, previous_value, new_value, reason)
-       select ${randomUUID()}, ${companyId}, ${subscriptionId}, ${actorId}, 'granted', e.entitlement_key, null, e.value, ${reason}
+       select gen_random_uuid(), ${companyId}, ${subscriptionId}, ${actorId}, 'granted', e.entitlement_key, null, e.value, ${reason}
          from plan_entitlements e
         where e.plan_id = ${planId}`,
   );
@@ -769,7 +769,7 @@ function revokeEntitlementsQueries(
 ) {
   return [
     tx`insert into entitlement_audit_logs (id, company_id, subscription_id, actor_user_id, action, entitlement_key, previous_value, new_value, reason)
-       select ${randomUUID()}, ${companyId}, ${subscriptionId}, ${actorId}, 'revoked', f.entitlement_key, null, null, ${reason}
+       select gen_random_uuid(), ${companyId}, ${subscriptionId}, ${actorId}, 'revoked', f.entitlement_key, null, null, ${reason}
          from feature_access_records f
         where f.subscription_id = ${subscriptionId} and f.granted = true`,
     tx`update feature_access_records
@@ -1149,7 +1149,7 @@ async function applySubscriptionUpdated(
             effective_date, billing_amount_ael, payment_status, confirmation_status, source_event, details)
          values (${randomUUID()}, ${sub.id}, ${actorId}, ${prevPlanId}, ${planId},
                  ${isDowngrade ? "downgraded" : "plan_changed"}, ${now}, ${targetPrice},
-                 ${null}, 'paid', 'confirmed', ${event.eventId}, ${{
+                 'paid', 'confirmed', ${event.eventId}, ${{
             stage: isDowngrade ? "downgrade_applied" : "plan_updated",
             downgradeRequestId: downgradeRequest?.id ?? null,
           } as never})`,

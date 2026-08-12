@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { AdminShell } from "~/components/AdminShell";
 import { Badge, Button, Card, ErrorText, Field, Input, Select, Textarea } from "~/components/ui";
 import {
   getAdminSession,
@@ -67,8 +66,7 @@ function SettingsPage() {
   );
 
   return (
-    <AdminShell admin={loader.admin}>
-      <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5">
         <div>
           <h1 className="text-xl font-bold text-navy">Platform Settings</h1>
           <p className="mt-1 text-sm text-muted">
@@ -88,8 +86,7 @@ function SettingsPage() {
         {loader.data && (
           <SettingsTabs data={loader.data} canEdit={canEdit} />
         )}
-      </div>
-    </AdminShell>
+    </div>
   );
 }
 

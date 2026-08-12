@@ -277,7 +277,7 @@ export async function doGetUpsellOpportunity(
     const [, opp, rels, evidence, history] = (await asUser(admin.id, "sb_admin", (tx) => [
       tx`select uo.id, uo.company_id, c.name as company_name, c.type as company_type,
                 c.verification_status as company_status, c.owner_id as company_owner_id,
-                co.name as company_owner_name, co.email as company_owner_email,
+                co.email as company_owner_email, cop.name as company_owner_name,
                 uo.existing_service_id, es.name as existing_service_name,
                 uo.suggested_service_id, ss.name as suggested_service_name,
                 uo.relationship, uo.evidence, uo.confidence, uo.confidence_score,
@@ -287,6 +287,7 @@ export async function doGetUpsellOpportunity(
          from upsell_opportunities uo
          left join companies c on c.id = uo.company_id
          left join users co on co.id = c.owner_id
+         left join profiles cop on cop.user_id = c.owner_id
          left join services es on es.id = uo.existing_service_id
          left join services ss on ss.id = uo.suggested_service_id
          left join profiles pr on pr.user_id = uo.owner_id

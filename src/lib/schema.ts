@@ -2812,6 +2812,50 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists subscription_history_sub_idx on subscription_history (subscription_id, created_at desc)`,
   `create index if not exists feature_access_sub_idx on feature_access_records (subscription_id)`,
   `create index if not exists entitlement_audit_sub_idx on entitlement_audit_logs (subscription_id)`,
+  // --- commitment_overrides (Master Admin spec section 5): senior-authorised
+  // exceptions to the three-month minimum commitment. Never invisible to the
+  // client: the company owner can always SELECT (overrides affect their
+  // account); only sb_admin can INSERT. Rows are immutable (no delete policy).
+  `create table if not exists commitment_overrides (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    company_id uuid not null references companies(id) on delete cascade,
+    requested_by uuid not null references users(id) on delete set null,
+    senior_admin_user_id uuid not null references users(id) on delete set null,
+    reason text not null check (reason in (
+      'approved commercial exception','service failure','duplicate subscription',
+      'billing error','regulatory requirement','client settlement',
+      'internal migration','administrative correction')),
+    client_request_note text,
+    financial_treatment text not null,
+    effective_date timestamptz not null,
+    status text not null default 'active' check (status in ('active','superseded','revoked')),
+    created_at timestamptz not null default now()
+  )`,
+  `alter table commitment_overrides enable row level security`,
+  `alter table commitment_overrides force row level security`,
+  `drop policy if exists commitment_overrides_select on commitment_overrides`,
+  `create policy commitment_overrides_select on commitment_overrides for select using (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+    or exists (select 1 from subscriptions s where s.id = commitment_overrides.subscription_id
+               and exists (select 1 from customers c where c.id = s.customer_id
+                           and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or exists (select 1 from companies co where co.id = commitment_overrides.company_id
+               and co.owner_id = nullif(current_setting('app.user_id', true), '')::uuid)
+  )`,
+  `drop policy if exists commitment_overrides_insert on commitment_overrides`,
+  `create policy commitment_overrides_insert on commitment_overrides for insert with check (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists commitment_overrides_update on commitment_overrides`,
+  `create policy commitment_overrides_update on commitment_overrides for update using (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `create index if not exists commitment_overrides_sub_idx on commitment_overrides (subscription_id, created_at desc)`,
+  `create index if not exists commitment_overrides_company_idx on commitment_overrides (company_id)`,
+
   // --- View as Client (Master Admin spec section 4): a temporary, audited,
   // admin-scoped support session that renders the client portal for one
   // company/client org. The token is a random secret (stored hashed, like

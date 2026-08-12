@@ -460,3 +460,127 @@ export const listPartnershipWorkspaces = createServerFn({ method: "GET" })
 export const listClientPortals = createServerFn({ method: "GET" }).handler(() =>
   doListClientPortals(),
 );
+
+// ------------------------------------------------------------- Stage 3 part 1
+// Subscription management panel + manual workflows (spec sections 5, 6, 10, 11).
+import {
+  doAdminCancelSubscription,
+  doAdminCommitmentOverride,
+  doAdminDowngradePreview,
+  doAdminExecuteUpgrade,
+  doAdminGetBillingPanel,
+  doAdminImmediateDowngrade,
+  doAdminScheduleDowngrade,
+  doAdminUpgradePreview,
+} from "./admin-subscriptions-actions";
+import type { AdminActor } from "./admin-subscriptions-actions";
+
+async function resolveAdminActor(session: Awaited<ReturnType<typeof doGetAdminSession>>): Promise<AdminActor | null> {
+  if (session.setupRequired || !session.admin) return null;
+  return {
+    id: session.admin.user.id,
+    role: session.admin.user.role,
+    staffRoles: (session.admin as { staffRoles?: string[] }).staffRoles ?? [],
+  };
+}
+
+export const adminGetBillingPanel = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminGetBillingPanel(actor, data.companyId);
+  });
+
+export const adminUpgradePreview = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string; newPlanId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminUpgradePreview(actor, data.companyId, data.newPlanId);
+  });
+
+export const adminExecuteUpgrade = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { companyId: string; newPlanId: string; internalReason: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminExecuteUpgrade(actor, data.companyId, data.newPlanId, data.internalReason);
+  });
+
+export const adminDowngradePreview = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string; newPlanId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminDowngradePreview(actor, data.companyId, data.newPlanId);
+  });
+
+export const adminScheduleDowngrade = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { companyId: string; newPlanId: string; internalReason: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminScheduleDowngrade(actor, data.companyId, data.newPlanId, data.internalReason);
+  });
+
+export const adminImmediateDowngrade = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        companyId: string;
+        newPlanId: string;
+        reason: string;
+        clientRequestNote?: string;
+        financialTreatment: string;
+        effectiveDate: string;
+      },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminImmediateDowngrade(actor, data.companyId, data.newPlanId, {
+      reason: data.reason,
+      clientRequestNote: data.clientRequestNote,
+      financialTreatment: data.financialTreatment,
+      effectiveDate: data.effectiveDate,
+    });
+  });
+
+export const adminCommitmentOverride = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        companyId: string;
+        reason: string;
+        clientRequestNote?: string;
+        financialTreatment: string;
+        effectiveDate: string;
+      },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminCommitmentOverride(actor, data.companyId, {
+      reason: data.reason,
+      clientRequestNote: data.clientRequestNote,
+      financialTreatment: data.financialTreatment,
+      effectiveDate: data.effectiveDate,
+    });
+  });
+
+export const adminCancelSubscription = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { companyId: string; mode: "end_of_period" | "immediate"; reason: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doAdminCancelSubscription(actor, data.companyId, data.mode, data.reason);
+  });

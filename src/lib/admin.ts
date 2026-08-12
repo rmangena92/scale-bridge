@@ -443,7 +443,10 @@ export const getAdminServiceInsights = createServerFn({ method: "GET" })
       return { ok: false as const, error: "Admin session required." };
     }
     try {
-      const insights = await asService((tx) => doGetAdminServiceInsights(tx));
+      const out = await asUser(session.admin.user.id, "sb_admin", (tx) => [
+        doGetAdminServiceInsights(tx) as unknown as Promise<readonly unknown[]>,
+      ]);
+      const insights = out[1] as import("./admin-platform-core").AdminServiceInsights;
       return { ok: true as const, insights };
     } catch (e) {
       return { ok: false as const, error: String(e) };

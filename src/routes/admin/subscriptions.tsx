@@ -203,7 +203,7 @@ function SubscriptionsPage() {
                       <Link
                         to="/admin/companies/$companyId"
                         params={{ companyId: r.companyId }}
-                        search={{}}
+                        search={{ notice: undefined }}
                         className="font-semibold text-navy hover:text-brand"
                       >
                         {r.companyName ?? "—"}

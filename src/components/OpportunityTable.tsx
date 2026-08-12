@@ -130,6 +130,7 @@ function Row({
           <Link
             to="/admin/companies/$companyId"
             params={{ companyId: o.companyId }}
+            search={{ notice: undefined }}
             className="font-semibold text-navy hover:text-brand"
           >
             {o.companyName}

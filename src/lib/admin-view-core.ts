@@ -544,7 +544,7 @@ export async function doGetViewAsClientContracts(
       packageCount: Number(r.package_count ?? 0),
       completionPct: r.completion === null ? null : Math.round(r.completion),
       visiblePackageCount: Number(r.package_count ?? 0),
-    }));
+    })) as import("./types").ClientContractSummary[];
     return { ok: true, data: contracts };
   } catch (e) {
     console.error("getViewAsClientContracts failed:", e);
@@ -861,6 +861,8 @@ export async function doListViewAsClientTeam(
       email: r.email,
       name: r.name,
       role: r.role,
+      userStatus: "active" as const,
+      isSelf: false,
       joinedAt: String(r.created_at),
     }));
     return { ok: true, data: team };
@@ -1125,7 +1127,7 @@ export async function doListViewAsClientMessages(input: {
       authorSide: r.from_lead ? "lead" : "client",
       createdAt: String(r.created_at),
       read: true,
-    }));
+    })) as import("./types").ClientMessage[];
     const entityTitle =
       type !== "general" && entityId
         ? (entityRows[0] as { title: string | null }[] | undefined)?.[0]?.title ?? null

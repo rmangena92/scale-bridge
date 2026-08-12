@@ -248,7 +248,7 @@ function CompanyDetailBody({
       await navigate({
         to: "/admin/companies/$companyId/view-as-client",
         params: { companyId: c.id },
-        search: { section: "dashboard" },
+        search: { section: "dashboard", ws: undefined, thread: undefined },
       });
     } else {
       setViewError(result.error);

@@ -803,7 +803,7 @@ export async function doListPartnershipWorkspaces(input: {
       participantCount: Number(r.participant_count ?? 0),
       packageCount: Number(r.package_count ?? 0),
       createdAt: String(r.created_at),
-    }));
+    })) as AdminPartnershipWorkspaceRow[];
     const statuses = (rows[2] as { status: string }[]).map((r) => r.status);
     const partByName = new Map<string, string[]>();
     for (const row of rows[3] as { workspace_id: string; participant_names: string[] }[]) {

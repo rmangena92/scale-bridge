@@ -37,11 +37,11 @@ export async function doGetAdminServiceInsights(tx: Sql): Promise<AdminServiceIn
        join companies c on c.id = cs.company_id
        order by c.name asc`,
   ]);
-  const relArr = rels as {
+  const relArr = rels as unknown as {
     company_id: string; company_name: string; service_id: string;
     source: string; confidence: string | null; verification_status: string;
   }[];
-  const rows: AdminServiceInsightRow[] = (cats as {
+  const rows: AdminServiceInsightRow[] = (cats as unknown as {
     service_id: string; service_name: string; category_name: string | null;
   }[]).map((svc) => {
     const rel = relArr.filter((r) => r.service_id === svc.service_id);

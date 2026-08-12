@@ -68,7 +68,7 @@ function UpsellsPage() {
     setError(null);
     try {
       const result = await listAdminUpsellOpportunities({ data: { filters } });
-      setData(result);
+      if (result.ok) setData(result);
       else setError(result.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load upsell opportunities.");

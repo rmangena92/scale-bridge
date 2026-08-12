@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import {
   createAdminCompanyNote,
   getAdminCompanyDetail,
+  getAdminCompanySubscription,
   getAdminSession,
   listCompanyServices,
   setAdminCompanyStatus,
@@ -17,6 +18,7 @@ import {
   WORKSPACE_STATUS_LABELS,
 } from "~/lib/types";
 import type { AdminCompanyDetail } from "~/lib/types";
+import type { AdminCompanySubscriptionDetail } from "~/lib/admin";
 import type { CompanyServiceRow } from "~/lib/services";
 import {
   ConfidenceBadge,
@@ -39,9 +41,10 @@ import {
 export const Route = createFileRoute("/admin/companies/$companyId")({
   loader: async ({ params }) => {
     const session = await getAdminSession();
-    const [detail, rels] = await Promise.all([
+    const [detail, rels, sub] = await Promise.all([
       getAdminCompanyDetail({ data: { companyId: params.companyId } }),
       listCompanyServices({ data: { companyId: params.companyId } }),
+      getAdminCompanySubscription({ data: { companyId: params.companyId } }),
     ]);
     return {
       setupRequired: session.setupRequired,
@@ -50,6 +53,8 @@ export const Route = createFileRoute("/admin/companies/$companyId")({
       loadError: detail.ok ? null : detail.error,
       relationships: rels.ok ? rels.relationships : [],
       relationshipsError: rels.ok ? null : rels.error,
+      subscription: sub.ok ? sub.detail : null,
+      subscriptionError: sub.ok ? null : sub.error,
     };
   },
   component: CompanyDetailPage,
@@ -75,6 +80,9 @@ type TabKey =
   | "information"
   | "services"
   | "evidence"
+  | "membership"
+  | "subscription"
+  | "entitlements"
   | "contracts"
   | "opportunities"
   | "documents"
@@ -89,6 +97,9 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "information", label: "Company Information" },
   { key: "services", label: "Services" },
   { key: "evidence", label: "Service Evidence" },
+  { key: "membership", label: "Membership" },
+  { key: "subscription", label: "Subscription" },
+  { key: "entitlements", label: "Feature Entitlements" },
   { key: "contracts", label: "Contracts" },
   { key: "opportunities", label: "Opportunities" },
   { key: "documents", label: "Documents" },
@@ -100,8 +111,16 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "notes", label: "Internal Notes" },
 ];
 function CompanyDetailPage() {
-  const { setupRequired, admin, detail, loadError, relationships, relationshipsError } =
-    Route.useLoaderData();
+  const {
+    setupRequired,
+    admin,
+    detail,
+    loadError,
+    relationships,
+    relationshipsError,
+    subscription,
+    subscriptionError,
+  } = Route.useLoaderData();
   if (setupRequired) {
     return (
       <DbSetupPage title="Company profile">
@@ -239,8 +258,11 @@ function CompanyDetailBody({
         ))}
       </div>
       {tab === "overview" && (
-        <OverviewTab detail={detail} status={status} onAction={runAction} adminCanMutate={adminCanMutate} busy={busy} onTab={setTab} />
+        <OverviewTab detail={detail} status={status} onAction={runAction} adminCanMutate={adminCanMutate} busy={busy} onTab={setTab} subscription={subscription} />
       )}
+      {tab === "membership" && <MembershipTab detail={detail} subscription={subscription} />}
+      {tab === "subscription" && <SubscriptionTab subscription={subscription} subscriptionError={subscriptionError} />}
+      {tab === "entitlements" && <EntitlementsTab detail={detail} subscription={subscription} />}
       {tab === "information" && <InformationTab detail={detail} />}
       {tab === "services" && <ServicesTab relationships={relationships} relationshipsError={relationshipsError} />}
       {tab === "evidence" && <EvidenceTab relationships={relationships} />}
@@ -308,8 +330,13 @@ function OverviewTab({
   adminCanMutate: boolean;
   busy: boolean;
   onTab: (t: TabKey) => void;
+  subscription: AdminCompanySubscriptionDetail | null;
 }) {
   const c = detail.company;
+  const sub = subscription?.subscription ?? null;
+  const plan = subscription?.plan ?? null;
+  const minCommit = subscription?.commitments?.[0] ?? null;
+  const outstandingInvoices = (subscription?.invoices ?? []).filter((i) => i.status === "Open").length;
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="flex flex-col gap-6 lg:col-span-2">
@@ -329,6 +356,30 @@ function OverviewTab({
         </Card>
 
         <Card className="p-6">
+          <SectionHeading title="Membership" body={sub ? "Live subscription data — see the Membership tab for full detail." : "No subscription record for this company yet."} />
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <Fact label="Current plan" value={plan?.name ?? "—"} />
+            <Fact label="Subscription status" value={sub?.statusLabel ?? "—"} />
+            <Fact label="Started" value={sub?.startedAt ? new Date(sub.startedAt).toLocaleDateString() : "—"} />
+            <Fact label="Next billing" value={sub?.nextBillingDate ? new Date(sub.nextBillingDate).toLocaleDateString() : "—"} />
+            <Fact label="Minimum commitment ends" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "—"} />
+            <Fact label="Downgrade eligibility" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "—"} />
+            <Fact label="Outstanding invoices" value={outstandingInvoices > 0 ? `${outstandingInvoices}` : "None"} />
+            <Fact label="Payment status" value={subscription?.invoices?.[0]?.status ?? "—"} />
+          </dl>
+          {sub && (
+            <div className="mt-4">
+              <Button size="sm" variant="secondary" onClick={() => onTab("membership")}>
+                Open Membership
+              </Button>
+              <Button size="sm" variant="secondary" className="ml-2" onClick={() => onTab("subscription")}>
+                Open Subscription
+              </Button>
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6">
           <SectionHeading title="Quick links" />
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" onClick={() => onTab("contracts")}>
@@ -339,6 +390,9 @@ function OverviewTab({
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onTab("contacts")}>
               Contacts ({detail.users.length})
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => onTab("membership")}>
+              Membership
             </Button>
             <Button size="sm" variant="secondary" onClick={() => onTab("verification")}>
               Verification
@@ -1092,4 +1146,314 @@ function formatDateTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// ------------------------------------------------------------- Membership
+function fmtDate2(v: string | null | undefined): string {
+  if (!v) return "—";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
+function fmtAed(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  return `AED ${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function MembershipTab({
+  detail,
+  subscription,
+}: {
+  detail: AdminCompanyDetail;
+  subscription: AdminCompanySubscriptionDetail | null;
+}) {
+  const sub = subscription?.subscription ?? null;
+  const plan = subscription?.plan ?? null;
+  const minCommit = subscription?.commitments?.[0] ?? null;
+  const pm = subscription?.paymentMethods?.[0] ?? null;
+  if (!sub) {
+    return (
+      <Card className="p-6">
+        <EmptyState
+          title="No membership yet"
+          body="This company has no subscription record. Memberships appear once a client selects a plan and completes checkout."
+        />
+      </Card>
+    );
+  }
+  const price = plan
+    ? sub.billingInterval === "annual"
+      ? plan.priceAnnualAel
+      : plan.priceMonthlyAel
+    : null;
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card className="p-6">
+        <SectionHeading title="Plan" body="Current membership plan and billing." />
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          <Fact label="Plan" value={plan?.name ?? "—"} />
+          <Fact label="Price" value={fmtAed(price)} />
+          <Fact label="Billing interval" value={sub.billingInterval === "annual" ? "Annual" : "Monthly"} />
+          <Fact label="Subscription status" value={sub.statusLabel} />
+          <Fact label="Start date" value={fmtDate2(sub.startedAt)} />
+          <Fact label="Current billing period" value={`${fmtDate2(sub.currentPeriodStart)} → ${fmtDate2(sub.currentPeriodEnd)}`} />
+          <Fact label="Next billing date" value={fmtDate2(sub.nextBillingDate)} />
+          <Fact label="Payment method" value={pm ? `${pm.brand ?? pm.type} •••• ${pm.last4 ?? ""}`.trim() : "—"} />
+        </dl>
+      </Card>
+      <Card className="p-6">
+        <SectionHeading title="Minimum commitment" body="Three-month minimum service commitment." />
+        {minCommit ? (
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <Fact label="Commitment start" value={fmtDate2(minCommit.commitmentStart)} />
+            <Fact label="Commitment end" value={fmtDate2(minCommit.commitmentEnd)} />
+            <Fact label="Cycles required" value={`${minCommit.cyclesRequired}`} />
+            <Fact label="Status" value={minCommit.completed ? "Completed" : "In progress"} />
+            <Fact label="Downgrade eligibility" value={fmtDate2(minCommit.commitmentEnd)} />
+          </dl>
+        ) : (
+          <p className="text-sm text-muted">No commitment record.</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- Subscription
+function SubscriptionTab({
+  subscription,
+  subscriptionError,
+}: {
+  subscription: AdminCompanySubscriptionDetail | null;
+  subscriptionError: string | null;
+}) {
+  if (subscriptionError) {
+    return (
+      <Card className="p-6">
+        <ErrorText>{subscriptionError}</ErrorText>
+      </Card>
+    );
+  }
+  if (!subscription || !subscription.subscription) {
+    return (
+      <Card className="p-6">
+        <EmptyState
+          title="No subscription record"
+          body="Nothing to show yet — this company has not created a subscription."
+        />
+      </Card>
+    );
+  }
+  const sub = subscription.subscription;
+  const plan = subscription.plan;
+  const outstanding = subscription.invoices.filter((i) => i.status === "Open").length;
+  const failedPayment = subscription.invoices.some((i) => i.status === "Failed");
+  const pendingUpgrade = subscription.upgradeRequests.find((u) => u.status === "Pending" || u.status === "Confirmed");
+  const pendingDowngrade = subscription.downgradeRequests.find((d) => d.status === "Pending" || d.status === "Confirmed");
+  const cancellation = subscription.cancellationRequests.find((cc) => cc.status === "Pending" || cc.status === "Confirmed");
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="p-6">
+          <SectionHeading title="Subscription" body="Read-only management panel — actions arrive with a later stage." />
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <Fact label="Plan" value={plan?.name ?? "—"} />
+            <Fact label="Billing interval" value={sub.billingInterval === "annual" ? "Annual" : "Monthly"} />
+            <Fact label="Status" value={sub.statusLabel} />
+            <Fact label="Started" value={fmtDate2(sub.startedAt)} />
+            <Fact label="Current period" value={`${fmtDate2(sub.currentPeriodStart)} → ${fmtDate2(sub.currentPeriodEnd)}`} />
+            <Fact label="Next billing date" value={fmtDate2(sub.nextBillingDate)} />
+            <Fact label="Outstanding balance" value={outstanding > 0 ? `${outstanding} open invoice${outstanding === 1 ? "" : "s"}` : "None"} />
+            <Fact label="Failed payment" value={failedPayment ? "Yes — action required" : "No"} />
+            <Fact label="Pending upgrade" value={pendingUpgrade ? pendingUpgrade.status : "—"} />
+            <Fact label="Pending downgrade" value={pendingDowngrade ? pendingDowngrade.status : "—"} />
+            <Fact label="Cancellation status" value={cancellation ? `${cancellation.status} (${cancellation.mode})` : sub.status === "cancelled" || sub.status === "cancel_at_period_end" ? sub.statusLabel : "—"} />
+            <Fact label="Stripe customer ID" value={subscription.customer?.providerCustomerId ?? "— (sandbox)"} />
+            <Fact label="Stripe subscription ID" value={sub.providerSubscriptionId ?? "— (sandbox)"} />
+          </dl>
+        </Card>
+        <Card className="p-6">
+          <SectionHeading title="Payment method" />
+          {subscription.paymentMethods.length === 0 ? (
+            <p className="text-sm text-muted">No payment method on file.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {subscription.paymentMethods.map((m) => (
+                <li key={m.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className="font-medium text-ink">
+                    {m.brand ?? m.type} •••• {m.last4 ?? ""}
+                    {m.expiry ? ` (${m.expiry})` : ""}
+                  </span>
+                  <Badge tone="teal">{m.isDefault ? "Default" : "—"}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <Card className="p-6">
+        <SectionHeading title="Invoices" body="Subscription invoices from the billing provider (sandbox)." />
+        {subscription.invoices.length === 0 ? (
+          <p className="text-sm text-muted">No invoices yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                  <th className="py-2 pr-3">Number</th>
+                  <th className="py-2 pr-3">Period</th>
+                  <th className="py-2 pr-3">Total</th>
+                  <th className="py-2 pr-3">Status</th>
+                  <th className="py-2 pr-3">Due</th>
+                  <th className="py-2">Paid</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {subscription.invoices.map((i) => (
+                  <tr key={i.id}>
+                    <td className="py-2 pr-3 font-medium text-navy">{i.invoiceNumber}</td>
+                    <td className="py-2 pr-3 text-muted">{fmtDate2(i.billingPeriodStart)} → {fmtDate2(i.billingPeriodEnd)}</td>
+                    <td className="py-2 pr-3">{fmtAed(i.totalAel)}</td>
+                    <td className="py-2 pr-3"><Badge tone="slate">{i.status}</Badge></td>
+                    <td className="py-2 pr-3 text-muted">{fmtDate2(i.dueDate)}</td>
+                    <td className="py-2 text-muted">{fmtDate2(i.paidAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="p-6">
+          <SectionHeading title="Payment events" />
+          {subscription.paymentEvents.length === 0 ? (
+            <p className="text-sm text-muted">No payment events yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {subscription.paymentEvents.slice(0, 12).map((e) => (
+                <li key={e.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className="font-medium text-ink">{e.eventType.replace(/_/g, " ")}</span>
+                  <span className="text-xs text-muted">{fmtAed(e.amountAel)} · {fmtDate2(e.occurredAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card className="p-6">
+          <SectionHeading title="Webhook history" body="Latest billing-provider webhook events (all tenants)." />
+          {subscription.webhooks.length === 0 ? (
+            <p className="text-sm text-muted">No webhook events yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {subscription.webhooks.slice(0, 12).map((w) => (
+                <li key={w.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className="font-medium text-ink">{w.event_type}</span>
+                  <span className="text-xs text-muted">{w.processed ? "processed" : "unprocessed"} · {fmtDate2(w.receivedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      <Card className="p-6">
+        <SectionHeading title="Subscription history" body="Plan changes, commitments and payment outcomes." />
+        {subscription.history.length === 0 ? (
+          <p className="text-sm text-muted">No history yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {subscription.history.map((h) => (
+              <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span className="font-medium capitalize text-ink">{h.changeType.replace(/_/g, " ")}</span>
+                <span className="text-xs text-muted">
+                  {h.billingAmountAel !== null ? fmtAed(h.billingAmountAel) : ""} · {fmtDate2(h.effectiveDate)} · {h.confirmationStatus ?? ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ------------------------------------------------- Feature Entitlements
+function EntitlementsTab({
+  detail,
+  subscription,
+}: {
+  detail: AdminCompanyDetail;
+  subscription: AdminCompanySubscriptionDetail | null;
+}) {
+  if (!subscription || !subscription.subscription) {
+    return (
+      <Card className="p-6">
+        <EmptyState
+          title="No entitlements yet"
+          body="Feature entitlements appear once the company has an active subscription plan."
+        />
+      </Card>
+    );
+  }
+  const plan = subscription.plan;
+  return (
+    <div className="flex flex-col gap-6">
+      <Card className="p-6">
+        <SectionHeading
+          title={`Plan entitlements — ${plan?.name ?? "Current plan"}`}
+          body="Entitlements included in the membership plan, marked Plan Included."
+        />
+        {subscription.planEntitlements.length === 0 ? (
+          <p className="text-sm text-muted">This plan has no entitlements configured.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {subscription.planEntitlements.map((e) => (
+              <span key={e.key} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-mist px-3 py-1 text-xs font-semibold text-ink">
+                {e.label}
+                <Badge tone="teal">Plan Included</Badge>
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+      <Card className="p-6">
+        <SectionHeading
+          title="Admin grants & revokes"
+          body="Manual feature_access_records — visible as Admin Granted / Admin Revoked with any expiry."
+        />
+        {subscription.featureAccess.length === 0 ? (
+          <p className="text-sm text-muted">No manual feature grants yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {subscription.featureAccess.map((f) => (
+              <span key={f.key} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-mist px-3 py-1 text-xs font-semibold text-ink">
+                {f.label}
+                <Badge tone={f.granted ? "green" : "red"}>
+                  {f.granted ? "Admin Granted" : "Admin Revoked"}
+                </Badge>
+                {f.effectiveTo && <span className="text-muted">until {fmtDate2(f.effectiveTo)}</span>}
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+      <Card className="p-6">
+        <SectionHeading title="Entitlement audit trail" body="Every grant / revoke / change, from entitlement_audit_logs." />
+        {subscription.entitlementAudit.length === 0 ? (
+          <p className="text-sm text-muted">No entitlement audit entries yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {subscription.entitlementAudit.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span className="font-medium text-ink">
+                  {e.action} — {e.entitlementKey.replace(/_/g, " ")}
+                </span>
+                <span className="text-xs text-muted">
+                  {e.reason ?? ""} · {fmtDate2(e.createdAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  );
 }

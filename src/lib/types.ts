@@ -867,8 +867,18 @@ export type AdminCompanySummary = {
   ownerId: string;
   ownerEmail: string | null;
   createdAt: string;
+  updatedAt: string;
   contractsCount: number;
   activeContractsCount: number;
+  /** Active partnership workspaces — same source as active contracts
+   *  (contract_workspaces), shown as its own column per the spec. */
+  activeWorkspacesCount: number;
+  /** Current membership plan name (latest subscription via customers). */
+  membershipPlan: string | null;
+  /** Latest subscription status ('' when the company has none). */
+  subscriptionStatus: string | null;
+  /** Most recent audit entry touching this company, else updated_at. */
+  lastActivity: string | null;
   // Not in the current companies schema — always null/0 until the services
   // catalogue build adds location/size/capacity and AI opportunity scoring.
   location: string | null;

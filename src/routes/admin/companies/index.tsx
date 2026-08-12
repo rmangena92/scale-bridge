@@ -27,6 +27,8 @@ export const Route = createFileRoute("/admin/companies/")({
         industry: "",
         activeStatus: "",
         participation: "",
+        membershipPlan: "",
+        subscriptionStatus: "",
       },
     });
     return {
@@ -34,6 +36,7 @@ export const Route = createFileRoute("/admin/companies/")({
       admin: session.admin,
       initial: result.ok ? result.companies : [],
       industries: result.ok ? result.industries : [],
+      plans: result.ok ? result.plans : [],
       loadError: result.ok ? null : result.error,
     };
   },
@@ -53,18 +56,80 @@ const statusTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" |
   archived: "slate",
 };
 
-/** Disabled filters — their data arrives with the services catalogue build. */
-const CATALOGUE_TOOLTIP = "Available after services catalogue build";
+/** Subscription statuses mirrored from the backend 13-status state machine. */
+const SUB_STATUSES = [
+  "pending_plan_selection",
+  "checkout_started",
+  "payment_pending",
+  "active",
+  "past_due",
+  "payment_failed",
+  "upgrade_pending",
+  "downgrade_scheduled",
+  "cancellation_requested",
+  "cancel_at_period_end",
+  "cancelled",
+  "expired",
+  "suspended",
+];
+const SUB_STATUS_LABELS: Record<string, string> = {
+  pending_plan_selection: "Pending Plan Selection",
+  checkout_started: "Checkout Started",
+  payment_pending: "Payment Pending",
+  active: "Active",
+  past_due: "Past Due",
+  payment_failed: "Payment Failed",
+  upgrade_pending: "Upgrade Pending",
+  downgrade_scheduled: "Downgrade Scheduled",
+  cancellation_requested: "Cancellation Requested",
+  cancel_at_period_end: "Cancel at Period End",
+  cancelled: "Cancelled",
+  expired: "Expired",
+  suspended: "Suspended",
+};
 
-function DisabledFilter({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+const subTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" | "teal"> = {
+  active: "green",
+  pending_plan_selection: "amber",
+  checkout_started: "blue",
+  payment_pending: "amber",
+  past_due: "amber",
+  payment_failed: "red",
+  upgrade_pending: "blue",
+  downgrade_scheduled: "amber",
+  cancellation_requested: "amber",
+  cancel_at_period_end: "amber",
+  cancelled: "red",
+  expired: "slate",
+  suspended: "red",
+};
+
+const healthTones: Record<string, "green" | "red" | "amber" | "slate" | "blue" | "teal"> = {
+  Good: "green",
+  Attention: "amber",
+  "At risk": "red",
+  Onboarding: "slate",
+};
+
+function accountHealth(c: AdminCompanySummary): string {
+  if (["suspended", "rejected", "archived"].includes(c.verificationStatus)) return "At risk";
+  const st = c.subscriptionStatus;
+  if (st === "payment_failed" || st === "past_due" || st === "cancelled" || st === "expired" || st === "suspended")
+    return "Attention";
+  if (st === "active") return "Good";
+  return "Onboarding";
+}
+
+function fmtDate(v: string | null | undefined): string {
+  if (!v) return "—";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
+
+/** Disabled filter — no source data for this column yet. */
+function DisabledFilter({ label, value }: { label: string; value: string }) {
   return (
-    <div className="w-44" title={CATALOGUE_TOOLTIP}>
+    <div className="w-44" title="No source data for this filter yet">
       <Field label={label}>
         <div className="relative">
           <Input value={value} readOnly disabled aria-disabled="true" />
@@ -81,11 +146,14 @@ function CompaniesPage() {
   const loader = Route.useLoaderData();
   const [companies, setCompanies] = useState<AdminCompanySummary[]>(loader.initial);
   const [industries, setIndustries] = useState<string[]>(loader.industries);
+  const [plans] = useState(loader.plans);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const [industry, setIndustry] = useState("");
   const [activeStatus, setActiveStatus] = useState("");
   const [participation, setParticipation] = useState("");
+  const [membershipPlan, setMembershipPlan] = useState("");
+  const [subscriptionStatus, setSubscriptionStatus] = useState("");
   const [error, setError] = useState<string | null>(loader.loadError);
   const [pending, setPending] = useState(false);
 
@@ -103,7 +171,7 @@ function CompaniesPage() {
     setPending(true);
     setError(null);
     const result = await listAdminCompanies({
-      data: { query, status, industry, activeStatus, participation },
+      data: { query, status, industry, activeStatus, participation, membershipPlan, subscriptionStatus },
     });
     setPending(false);
     if (result.ok) {
@@ -122,8 +190,9 @@ function CompaniesPage() {
         </p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Master company directory</h1>
         <p className="mt-2 max-w-xl text-sm text-muted">
-          Search and filter every registered company. Location, size, capacity
-          and AI opportunity filters arrive with the services catalogue build.
+          Search and filter every registered company — membership, subscription,
+          verification and account health included. Location data has no source
+          column yet, so it shows as — until the schema lands.
         </p>
       </div>
 
@@ -171,6 +240,38 @@ function CompaniesPage() {
               </Select>
             </Field>
           </div>
+          <div className="w-48">
+            <Field label="Membership plan" htmlFor="company-plan">
+              <Select
+                id="company-plan"
+                value={membershipPlan}
+                onChange={(e) => setMembershipPlan(e.target.value)}
+              >
+                <option value="">All plans</option>
+                {plans.map((p) => (
+                  <option key={p.code} value={p.code}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="w-48">
+            <Field label="Subscription status" htmlFor="company-sub-status">
+              <Select
+                id="company-sub-status"
+                value={subscriptionStatus}
+                onChange={(e) => setSubscriptionStatus(e.target.value)}
+              >
+                <option value="">All</option>
+                {SUB_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {SUB_STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
           <div className="w-44">
             <Field label="Active status" htmlFor="company-active">
               <Select
@@ -204,11 +305,6 @@ function CompaniesPage() {
         </form>
         <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4">
           <DisabledFilter label="Location" value="—" />
-          <DisabledFilter label="Size" value="—" />
-          <DisabledFilter label="Capacity" value="—" />
-          <DisabledFilter label="Service" value="—" />
-          <DisabledFilter label="Unused services" value="—" />
-          <DisabledFilter label="AI opportunity score" value="—" />
         </div>
       </Card>
 
@@ -227,20 +323,25 @@ function CompaniesPage() {
             />
           </div>
         ) : (
-          <table className="w-full min-w-[820px] text-left text-sm">
+          <table className="w-full min-w-[1150px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
                 <th className="px-5 py-3">Company</th>
                 <th className="px-3 py-3">Industry</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Contract participation</th>
-                <th className="px-3 py-3">Owner</th>
-                <th className="px-5 py-3">Created</th>
+                <th className="px-3 py-3">Verification</th>
+                <th className="px-3 py-3">Membership plan</th>
+                <th className="px-3 py-3">Subscription</th>
+                <th className="px-3 py-3">Location</th>
+                <th className="px-3 py-3">Active contracts</th>
+                <th className="px-3 py-3">Active workspaces</th>
+                <th className="px-3 py-3">Account health</th>
+                <th className="px-3 py-3">Last activity</th>
+                <th className="px-5 py-3">Owner</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {companies.map((c) => (
-                <tr key={c.id} className="hover:bg-mist/60">
+                <tr key={c.id} className="hover:bg-mist/60 align-top">
                   <td className="px-5 py-3">
                     <Link
                       to="/admin/companies/$companyId"
@@ -257,6 +358,17 @@ function CompaniesPage() {
                       {COMPANY_STATUS_LABELS[c.verificationStatus]}
                     </Badge>
                   </td>
+                  <td className="px-3 py-3 font-medium text-navy">{c.membershipPlan ?? "—"}</td>
+                  <td className="px-3 py-3">
+                    {c.subscriptionStatus ? (
+                      <Badge tone={subTones[c.subscriptionStatus] ?? "slate"}>
+                        {SUB_STATUS_LABELS[c.subscriptionStatus] ?? c.subscriptionStatus}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-muted">{c.location ?? "—"}</td>
                   <td className="px-3 py-3">
                     {c.contractsCount === 0 ? (
                       <span className="text-xs text-muted">No contracts</span>
@@ -276,10 +388,12 @@ function CompaniesPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-muted">{c.ownerEmail ?? "—"}</td>
-                  <td className="px-5 py-3 text-xs text-muted">
-                    {new Date(c.createdAt).toLocaleDateString()}
+                  <td className="px-3 py-3 text-muted">{c.activeWorkspacesCount}</td>
+                  <td className="px-3 py-3">
+                    <Badge tone={healthTones[accountHealth(c)] ?? "slate"}>{accountHealth(c)}</Badge>
                   </td>
+                  <td className="px-3 py-3 text-xs text-muted">{fmtDate(c.lastActivity)}</td>
+                  <td className="px-5 py-3 text-muted">{c.ownerEmail ?? "—"}</td>
                 </tr>
               ))}
             </tbody>

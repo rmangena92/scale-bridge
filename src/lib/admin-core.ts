@@ -86,6 +86,7 @@ export type CompaniesResult =
       companies: AdminCompanySummary[];
       total: number;
       industries: string[];
+      plans: { code: string; name: string }[];
     }
   | { ok: false; error: string; setupRequired?: boolean };
 
@@ -573,6 +574,8 @@ export async function doListCompanies(input: {
   industry: string;
   activeStatus: string;
   participation: string;
+  membershipPlan: string;
+  subscriptionStatus: string;
 }): Promise<CompaniesResult> {
   if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED", setupRequired: true };
   const q = (input.query ?? "").trim();
@@ -585,6 +588,8 @@ export async function doListCompanies(input: {
   const participation = ["none", "any", "active"].includes(input.participation ?? "")
     ? input.participation
     : "";
+  const membershipPlan = (input.membershipPlan ?? "").trim().slice(0, 60);
+  const subscriptionStatus = (input.subscriptionStatus ?? "").trim().slice(0, 60);
   try {
     await ensureSchema();
     const admin = await loadAdminUser();
@@ -592,7 +597,7 @@ export async function doListCompanies(input: {
 
     const pattern = `%${q}%`;
     const rows = await asUser(admin.user.id, admin.user.role, (tx) => [
-      tx`select c.id, c.name, c.type, c.verification_status, c.created_at,
+      tx`select c.id, c.name, c.type, c.verification_status, c.created_at, c.updated_at,
                 c.owner_id, u.email as owner_email,
                 (select count(*)::int from contract_workspaces cw
                   where cw.lead_contractor_id = c.owner_id
@@ -602,7 +607,18 @@ export async function doListCompanies(input: {
                   where cw.status = 'active'
                     and (cw.lead_contractor_id = c.owner_id
                          or exists (select 1 from invitations i
-                                    where i.workspace_id = cw.id and i.company_id = c.id))) as active_contracts_count
+                                    where i.workspace_id = cw.id and i.company_id = c.id))) as active_contracts_count,
+                (select p2.name from subscriptions s2
+                   join customers c2 on c2.id = s2.customer_id
+                   join membership_plans p2 on p2.id = s2.plan_id
+                   where c2.company_id = c.id
+                   order by s2.created_at desc limit 1) as membership_plan,
+                (select s3.status from subscriptions s3
+                   join customers c3 on c3.id = s3.customer_id
+                   where c3.company_id = c.id
+                   order by s3.created_at desc limit 1) as subscription_status,
+                coalesce((select max(a.created_at) from audit_logs a
+                           where a.details ->> 'companyId' = c.id::text), c.updated_at) as last_activity
          from companies c
          left join users u on u.id = c.owner_id
          where (${q} = '' or c.name ilike ${pattern} or coalesce(u.email, '') ilike ${pattern})
@@ -611,6 +627,17 @@ export async function doListCompanies(input: {
            and (${activeStatus} = ''
                 or (${activeStatus} = 'active' and c.verification_status not in ('suspended','rejected','archived'))
                 or (${activeStatus} = 'inactive' and c.verification_status in ('suspended','rejected','archived')))
+           and (${membershipPlan} = '' or (
+                 select p5.code from subscriptions s5
+                   join customers c5 on c5.id = s5.customer_id
+                   join membership_plans p5 on p5.id = s5.plan_id
+                   where c5.company_id = c.id
+                   order by s5.created_at desc limit 1) = ${membershipPlan})
+           and (${subscriptionStatus} = '' or (
+                 select s6.status from subscriptions s6
+                   join customers c6 on c6.id = s6.customer_id
+                   where c6.company_id = c.id
+                   order by s6.created_at desc limit 1) = ${subscriptionStatus})
            and (${participation} = ''
                 or (${participation} = 'none' and not exists (
                       select 1 from contract_workspaces cw2
@@ -633,6 +660,8 @@ export async function doListCompanies(input: {
       tx`select distinct type from companies
          where type is not null and type <> ''
          order by type`,
+      tx`select code, name from membership_plans
+         where status = 'Active' order by sort_order`,
     ]);
     const list = rows[1] as unknown[];
     const companies: AdminCompanySummary[] = (list as {
@@ -641,10 +670,14 @@ export async function doListCompanies(input: {
       type: string | null;
       verification_status: CompanyStatus;
       created_at: string;
+      updated_at: string;
       owner_id: string;
       owner_email: string | null;
       contracts_count: number;
       active_contracts_count: number;
+      membership_plan: string | null;
+      subscription_status: string | null;
+      last_activity: string | null;
     }[]).map((r) => ({
       id: r.id,
       name: r.name,
@@ -653,13 +686,22 @@ export async function doListCompanies(input: {
       ownerId: r.owner_id,
       ownerEmail: r.owner_email,
       createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
       contractsCount: r.contracts_count ?? 0,
       activeContractsCount: r.active_contracts_count ?? 0,
+      activeWorkspacesCount: r.active_contracts_count ?? 0, // same source: contract_workspaces
+      membershipPlan: r.membership_plan,
+      subscriptionStatus: r.subscription_status,
+      lastActivity: r.last_activity ? String(r.last_activity) : null,
       location: null, // companies has no location column yet (catalogue build)
       aiOpportunityScore: 0, // AI opportunity scoring lands with the catalogue
     }));
     const industries = (rows[2] as { type: string }[]).map((r) => r.type);
-    return { ok: true, companies, total: companies.length, industries };
+    const plans = (rows[3] as { code: string; name: string }[]).map((p) => ({
+      code: p.code,
+      name: p.name,
+    }));
+    return { ok: true, companies, total: companies.length, industries, plans };
   } catch (err) {
     console.error("listCompanies failed:", err);
     return { ok: false, error: "Could not load companies." };

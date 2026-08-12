@@ -63,6 +63,12 @@ import {
   doUpdateService,
   doUpdateServiceCategory,
 } from "./services";
+import {
+  doGetAdminCompanySubscription,
+  doListAdminSubscriptions,
+  doListClientPortals,
+  doListPartnershipWorkspaces,
+} from "./admin-subscriptions-core";
 import type {
   AdminRole,
   DocumentReviewAction,
@@ -108,6 +114,17 @@ export type {
   ServiceEvidenceListResult,
   ServicesResult,
 } from "./services";
+export type {
+  AdminClientPortalRow,
+  AdminClientPortalsResult,
+  AdminCompanySubscriptionDetail,
+  AdminCompanySubscriptionResult,
+  AdminEntitlementView,
+  AdminPartnershipWorkspaceRow,
+  AdminPartnershipWorkspacesResult,
+  AdminSubscriptionListResult,
+  AdminSubscriptionRow,
+} from "./admin-subscriptions-core";
 
 export const getAdminSession = createServerFn({ method: "GET" }).handler(() =>
   doGetAdminSession(),
@@ -150,6 +167,8 @@ export const listAdminCompanies = createServerFn({ method: "GET" })
         industry: string;
         activeStatus: string;
         participation: string;
+        membershipPlan: string;
+        subscriptionStatus: string;
       },
   )
   .handler(({ data }) => doListCompanies(data));
@@ -404,3 +423,20 @@ export const updateServiceCategory = createServerFn({ method: "POST" })
       sortOrder: data.sortOrder,
     }),
   );
+
+// ------------------------------------------------ subscriptions (Stage 1 MAP)
+export const listAdminSubscriptions = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { status: string; planId: string })
+  .handler(({ data }) => doListAdminSubscriptions(data));
+
+export const getAdminCompanySubscription = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { companyId: string })
+  .handler(({ data }) => doGetAdminCompanySubscription(data.companyId));
+
+export const listPartnershipWorkspaces = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { status: string })
+  .handler(({ data }) => doListPartnershipWorkspaces(data));
+
+export const listClientPortals = createServerFn({ method: "GET" }).handler(() =>
+  doListClientPortals(),
+);

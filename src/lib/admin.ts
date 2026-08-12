@@ -77,6 +77,8 @@ import {
   doAdminRevokeEntitlement,
 } from "./admin-entitlements-actions";
 import type { EntitlementGrantType } from "./admin-entitlements-actions";
+import { doGetAdminReports } from "./admin-reports-core";
+export type { AdminReportsData, AdminReportsResult } from "./admin-reports-core";
 import type {
   AdminRole,
   DocumentReviewAction,
@@ -218,6 +220,9 @@ export const updateAdminCompanyNote = createServerFn({ method: "POST" })
 
 export const getFinanceSummary = createServerFn({ method: "GET" }).handler(() =>
   doGetFinanceSummary(),
+);
+export const getAdminReports = createServerFn({ method: "GET" }).handler(() =>
+  doGetAdminReports(),
 );
 
 export const listDisputes = createServerFn({ method: "GET" }).handler(() =>

@@ -301,7 +301,7 @@ export async function doAdminGetBillingPanel(
     let cancellation: AdminBillingPanel["cancellation"] = null;
     const availablePlans: AdminBillingPanel["availablePlans"] = [];
     let features: string[] = [];
-    let entitlements: { key: string; value: unknown }[] = [];
+    let entitlements: { key: string; value: Record<string, string | number | boolean | null> }[] = [];
     if (sub) {
       const [, mcRows, pmRows, invRows, evRows, whRows, ovRows, upRows, dnRows, cxRows, plans, feats, ents] =
         (await asUser(admin.id, "sb_admin", (tx) => [

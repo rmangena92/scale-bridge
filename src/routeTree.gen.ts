@@ -75,6 +75,7 @@ import { Route as AdminServicesCategoriesRouteImport } from './routes/admin/serv
 import { Route as AdminServicesServiceIdRouteImport } from './routes/admin/services/$serviceId'
 import { Route as AdminContractsWorkspaceIdRouteImport } from './routes/admin/contracts/$workspaceId'
 import { Route as AdminCompaniesCompanyIdRouteImport } from './routes/admin/companies/$companyId'
+import { Route as AdminCompaniesCompanyIdIndexRouteImport } from './routes/admin/companies/$companyId/index'
 import { Route as AdminCompaniesCompanyIdViewAsClientRouteImport } from './routes/admin/companies/$companyId/view-as-client'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
@@ -410,6 +411,12 @@ const AdminCompaniesCompanyIdRoute = AdminCompaniesCompanyIdRouteImport.update({
   path: '/$companyId',
   getParentRoute: () => AdminCompaniesRoute,
 } as any)
+const AdminCompaniesCompanyIdIndexRoute =
+  AdminCompaniesCompanyIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AdminCompaniesCompanyIdRoute,
+  } as any)
 const AdminCompaniesCompanyIdViewAsClientRoute =
   AdminCompaniesCompanyIdViewAsClientRouteImport.update({
     id: '/view-as-client',
@@ -485,6 +492,7 @@ export interface FileRoutesByFullPath {
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
   '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
+  '/admin/companies/$companyId/': typeof AdminCompaniesCompanyIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -528,7 +536,6 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/client': typeof ClientIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
-  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
@@ -545,6 +552,7 @@ export interface FileRoutesByTo {
   '/admin/verification': typeof AdminVerificationIndexRoute
   '/client/contracts': typeof ClientContractsIndexRoute
   '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
+  '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -615,6 +623,7 @@ export interface FileRoutesById {
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
   '/admin/companies/$companyId/view-as-client': typeof AdminCompaniesCompanyIdViewAsClientRoute
+  '/admin/companies/$companyId/': typeof AdminCompaniesCompanyIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -686,6 +695,7 @@ export interface FileRouteTypes {
     | '/admin/verification/'
     | '/client/contracts/'
     | '/admin/companies/$companyId/view-as-client'
+    | '/admin/companies/$companyId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -729,7 +739,6 @@ export interface FileRouteTypes {
     | '/admin'
     | '/client'
     | '/workspaces'
-    | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
     | '/admin/services/$serviceId'
     | '/admin/services/categories'
@@ -746,6 +755,7 @@ export interface FileRouteTypes {
     | '/admin/verification'
     | '/client/contracts'
     | '/admin/companies/$companyId/view-as-client'
+    | '/admin/companies/$companyId'
   id:
     | '__root__'
     | '/'
@@ -815,6 +825,7 @@ export interface FileRouteTypes {
     | '/admin/verification/'
     | '/client/contracts/'
     | '/admin/companies/$companyId/view-as-client'
+    | '/admin/companies/$companyId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1297,6 +1308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCompaniesCompanyIdRouteImport
       parentRoute: typeof AdminCompaniesRoute
     }
+    '/admin/companies/$companyId/': {
+      id: '/admin/companies/$companyId/'
+      path: '/'
+      fullPath: '/admin/companies/$companyId/'
+      preLoaderRoute: typeof AdminCompaniesCompanyIdIndexRouteImport
+      parentRoute: typeof AdminCompaniesCompanyIdRoute
+    }
     '/admin/companies/$companyId/view-as-client': {
       id: '/admin/companies/$companyId/view-as-client'
       path: '/view-as-client'
@@ -1309,12 +1327,14 @@ declare module '@tanstack/react-router' {
 
 interface AdminCompaniesCompanyIdRouteChildren {
   AdminCompaniesCompanyIdViewAsClientRoute: typeof AdminCompaniesCompanyIdViewAsClientRoute
+  AdminCompaniesCompanyIdIndexRoute: typeof AdminCompaniesCompanyIdIndexRoute
 }
 
 const AdminCompaniesCompanyIdRouteChildren: AdminCompaniesCompanyIdRouteChildren =
   {
     AdminCompaniesCompanyIdViewAsClientRoute:
       AdminCompaniesCompanyIdViewAsClientRoute,
+    AdminCompaniesCompanyIdIndexRoute: AdminCompaniesCompanyIdIndexRoute,
   }
 
 const AdminCompaniesCompanyIdRouteWithChildren =

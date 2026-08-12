@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, DbSetupPage, EmptyState, ErrorText } from "~/components/ui";
+import { Badge, Button, Card, EmptyState, ErrorText } from "~/components/ui";
 import {
   exitViewAsClient,
   getViewAsClientContract,
@@ -37,7 +37,7 @@ export const Route = createFileRoute("/admin/companies/$companyId/view-as-client
     thread: typeof search.thread === "string" ? search.thread : undefined,
   }),
   loaderDeps: ({ search }) => ({ section: search.section, ws: search.ws, thread: search.thread }),
-  loader: async ({ params, deps }) => {
+  loader: async ({ deps }) => {
     const session = await getViewAsClientSession();
     if (!session.ok) {
       return {
@@ -224,7 +224,7 @@ function ViewAsClientPage() {
                 <Link
                   to="/admin/companies/$companyId/view-as-client"
                   params={{ companyId: params.companyId }}
-                  search={{ section: item.key }}
+                  search={{ section: item.key, ws: undefined, thread: undefined }}
                   className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                     active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
                   }`}
@@ -266,7 +266,7 @@ function ViewAsClientPage() {
             <span className="hidden rounded bg-navy/10 px-2 py-1 text-[11px] font-bold text-navy lg:inline">
               expires {new Date(session.expiresAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
             </span>
-            <Button size="sm" variant="danger" onClick={handleExit} disabled={exiting}>
+            <Button size="sm" variant="outline" onClick={handleExit} disabled={exiting}>
               {exiting ? "Exiting..." : "Exit view"}
             </Button>
           </div>
@@ -461,7 +461,7 @@ function DashboardSection({ stats, companyId }: { stats: ClientDashboardStats | 
                     <Link
                       to="/admin/companies/$companyId/view-as-client"
                       params={{ companyId }}
-                      search={{ section: "contract", ws: c.id }}
+                      search={{ section: "contract", ws: c.id, thread: undefined }}
                       className="min-w-0 truncate text-sm font-semibold text-ink hover:underline"
                     >
                       {c.title}
@@ -533,7 +533,7 @@ function ContractsSection({ contracts, companyId }: { contracts: ClientContractS
               <Link
                 to="/admin/companies/$companyId/view-as-client"
                 params={{ companyId }}
-                search={{ section: "contract", ws: c.id }}
+                search={{ section: "contract", ws: c.id, thread: undefined }}
                 className="mt-4 inline-block text-sm font-semibold text-brand hover:underline"
               >
                 Open contract view
@@ -554,7 +554,7 @@ function ContractSection({ contract, companyId }: { contract: ClientContractDeta
       <Link
         to="/admin/companies/$companyId/view-as-client"
         params={{ companyId }}
-        search={{ section: "contracts" }}
+        search={{ section: "contracts", ws: undefined, thread: undefined }}
         className="text-sm font-semibold text-brand hover:underline"
       >
         Back to contracts
@@ -569,7 +569,7 @@ function ContractSection({ contract, companyId }: { contract: ClientContractDeta
           { label: "Contract value", value: fmtMoney(ws.contractValue) },
           { label: "Start date", value: ws.startDate ?? "-" },
           { label: "End date", value: ws.endDate ?? "-" },
-          { label: "Lead", value: contract.lead.companyName ?? contract.lead.name ?? contract.lead.email ?? "-" },
+          { label: "Lead", value: contract.lead?.companyName ?? contract.lead?.name ?? contract.lead?.email ?? "-" },
         ].map((x) => (
           <Card key={x.label} className="p-4">
             <p className="text-xs font-bold uppercase tracking-wider text-muted">{x.label}</p>
@@ -694,7 +694,7 @@ function ContractSection({ contract, companyId }: { contract: ClientContractDeta
                   <p className="truncate font-mono text-xs font-semibold text-navy">{a.action}</p>
                   <p className="truncate text-xs text-muted">{a.actorEmail ?? "system"}</p>
                 </div>
-                <span className="shrink-0 text-xs text-muted">{fmtDateTime(a.createdAt)}</span>
+                <span className="shrink-0 text-xs text-muted">{fmtDateTime(a.createdAt ?? "")}</span>
               </li>
             ))}
           </ul>

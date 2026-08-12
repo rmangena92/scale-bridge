@@ -16,7 +16,6 @@ import {
   COMPANY_STATUS_LABELS,
   DOCUMENT_REVIEW_LABELS,
   ROLE_LABELS,
-  WORKSPACE_STATUS_LABELS,
 } from "~/lib/types";
 import type { AdminCompanyDetail } from "~/lib/types";
 import type { AdminCompanySubscriptionDetail } from "~/lib/admin";
@@ -249,6 +248,7 @@ function CompanyDetailBody({
       await navigate({
         to: "/admin/companies/$companyId/view-as-client",
         params: { companyId: c.id },
+        search: { section: "dashboard" },
       });
     } else {
       setViewError(result.error);
@@ -673,7 +673,7 @@ function ContractsTab({ detail }: { detail: AdminCompanyDetail }) {
               {contracts.map((c) => (
                 <tr key={c.id} className="hover:bg-mist/60">
                   <td className="px-5 py-3">
-                    <Link to={`/admin/contracts/${c.id}`} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
+                    <Link to="/admin/contracts/$workspaceId" params={{ workspaceId: c.id }} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
                   </td>
                   <td className="px-3 py-3">
                     {c.role === "lead" ? <Badge tone="teal">Lead</Badge> : <Badge tone="slate">Participant</Badge>}
@@ -726,7 +726,7 @@ function WorkspacesTab({ detail }: { detail: AdminCompanyDetail }) {
               {detail.contracts.map((c) => (
                 <tr key={c.id} className="hover:bg-mist/60">
                   <td className="px-5 py-3">
-                    <Link to={`/admin/contracts/${c.id}`} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
+                    <Link to="/admin/contracts/$workspaceId" params={{ workspaceId: c.id }} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
                   </td>
                   <td className="px-3 py-3">
                     {c.role === "lead" ? <Badge tone="teal">Lead</Badge> : <Badge tone="slate">Participant</Badge>}
@@ -791,7 +791,7 @@ function ClientPortalsTab({
                       <ul className="space-y-0.5">
                         {o.contracts.map((c) => (
                           <li key={c.id}>
-                            <Link to={`/admin/contracts/${c.id}`} className="text-brand hover:underline">{c.title}</Link>
+                            <Link to="/admin/contracts/$workspaceId" params={{ workspaceId: c.id }} className="text-brand hover:underline">{c.title}</Link>
                           </li>
                         ))}
                       </ul>

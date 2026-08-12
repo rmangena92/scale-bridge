@@ -229,6 +229,7 @@ function ProvidersCard({ detail }: { detail: Extract<ServiceDetailResult, { ok: 
                   <Link
                     to="/admin/companies/$companyId"
                     params={{ companyId: p.companyId }}
+                    search={{}}
                     className="font-semibold text-navy hover:text-brand"
                   >
                     {p.companyName}

@@ -443,9 +443,7 @@ export const getAdminServiceInsights = createServerFn({ method: "GET" })
       return { ok: false as const, error: "Admin session required." };
     }
     try {
-      const insights = await asService(session.admin.userId, (tx) =>
-        doGetAdminServiceInsights(tx),
-      );
+      const insights = await asService((tx) => doGetAdminServiceInsights(tx));
       return { ok: true as const, insights };
     } catch (e) {
       return { ok: false as const, error: String(e) };

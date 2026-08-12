@@ -274,7 +274,7 @@ export async function doListAdminSubscriptions(input: {
          left join companies co on co.id = c.company_id
          left join users u on u.id = c.user_id
          where (${status} = '' or s.status = ${status})
-           and (${planId} = '' or s.plan_id = ${planId})
+           and (${planId} = '' or s.plan_id = ${planId === "" ? null : planId})
          order by s.created_at desc
          limit 300`,
       tx`select id, code, name, category from membership_plans

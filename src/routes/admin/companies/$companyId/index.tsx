@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { enterViewAsClient } from "~/lib/admin-view";
 import {
+  adminGrantEntitlement,
+  adminListCompanyEntitlements,
+  adminRevokeEntitlement,
   createAdminCompanyNote,
   getAdminCompanyDetail,
   getAdminCompanySubscription,
@@ -18,7 +21,11 @@ import {
   ROLE_LABELS,
 } from "~/lib/types";
 import type { AdminCompanyDetail } from "~/lib/types";
-import type { AdminCompanySubscriptionDetail } from "~/lib/admin";
+import type {
+  AdminCompanySubscriptionDetail,
+  CompanyEntitlementRow,
+  CompanyEntitlementsResult,
+} from "~/lib/admin";
 import type { CompanyServiceRow } from "~/lib/services";
 import {
   ConfidenceBadge,
@@ -35,6 +42,9 @@ import {
   DbSetupPage,
   EmptyState,
   ErrorText,
+  Field,
+  Input,
+  Select,
   Textarea,
 } from "~/components/ui";
 import { AdminSubscriptionPanel } from "~/components/AdminSubscriptionPanel";
@@ -330,7 +340,9 @@ function CompanyDetailBody({
       {tab === "subscription" && (
         <SubscriptionTab companyId={detail.company.id} staffRoles={staffRoles} adminCanMutate={adminCanMutate} />
       )}
-      {tab === "entitlements" && <EntitlementsTab detail={detail} subscription={subscription} />}
+      {tab === "entitlements" && (
+        <EntitlementsTab companyId={detail.company.id} staffRoles={staffRoles} adminCanMutate={adminCanMutate} subscription={subscription} />
+      )}
       {tab === "information" && <InformationTab detail={detail} />}
       {tab === "services" && <ServicesTab relationships={relationships} relationshipsError={relationshipsError} />}
       {tab === "evidence" && <EvidenceTab relationships={relationships} />}
@@ -1546,68 +1558,170 @@ function SubscriptionTab({
     />
   );
 }
-// ------------------------------------------------- Feature Entitlements
+// ------------------------------------------------- Feature Entitlements (spec 7)
+const ENTITLEMENT_CHOICES: { key: string; label: string }[] = [
+  { key: "basic_profile", label: "Basic Profile" },
+  { key: "verified_profile", label: "Verified Profile" },
+  { key: "expanded_profile", label: "Expanded Profile" },
+  { key: "directory_visibility", label: "Directory Visibility" },
+  { key: "opportunity_access", label: "Opportunity Access" },
+  { key: "contract_participation", label: "Contract Participation" },
+  { key: "contract_invitations", label: "Contract Invitations" },
+  { key: "unlimited_invitations", label: "Unlimited Invitations" },
+  { key: "team_members", label: "Team Members" },
+  { key: "document_storage", label: "Document Storage" },
+  { key: "work_packages", label: "Work Packages" },
+  { key: "tasks_and_milestones", label: "Tasks and Milestones" },
+  { key: "client_portal", label: "Client Portal" },
+  { key: "bid_workspace", label: "Bid Workspace" },
+  { key: "pricing_comparison", label: "Pricing Comparison" },
+  { key: "pricing_submissions", label: "Pricing Submissions" },
+  { key: "approvals", label: "Approvals" },
+  { key: "variations", label: "Variations" },
+  { key: "invoice_tracking", label: "Invoice Tracking" },
+  { key: "performance_reports", label: "Performance Reports" },
+  { key: "ai_partnership_intelligence", label: "AI Partnership Intelligence" },
+  { key: "priority_support", label: "Priority Support" },
+  { key: "private_partner_network", label: "Private Partner Network" },
+  { key: "api_access", label: "API Access" },
+  { key: "multiple_locations", label: "Multiple Locations" },
+  { key: "multiple_divisions", label: "Multiple Divisions" },
+  { key: "advanced_reporting", label: "Advanced Reporting" },
+];
+const ENTITLEMENT_MUTATE = ["operations", "finance", "super_admin"];
+const ENTITLEMENT_STATUS_TONES: Record<
+  string,
+  "teal" | "blue" | "amber" | "green" | "red" | "slate"
+> = {
+  "Plan Included": "teal",
+  "Admin Granted": "blue",
+  Promotional: "amber",
+  Temporary: "green",
+  Restricted: "red",
+  Expired: "slate",
+};
+
 function EntitlementsTab({
+  companyId,
+  staffRoles,
+  adminCanMutate,
   subscription,
 }: {
-  detail: AdminCompanyDetail;
+  companyId: string;
+  staffRoles: string[];
+  adminCanMutate: boolean;
   subscription: AdminCompanySubscriptionDetail | null;
 }) {
-  if (!subscription || !subscription.subscription) {
+  const [ent, setEnt] = useState<CompanyEntitlementsResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [revokeRow, setRevokeRow] = useState<CompanyEntitlementRow | null>(null);
+  const load = async () => {
+    setLoading(true);
+    setLoadError(null);
+    const res = await adminListCompanyEntitlements({ data: { companyId } });
+    if (res.ok) setEnt(res);
+    else setLoadError(res.error);
+    setLoading(false);
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+  const canMutate =
+    adminCanMutate && staffRoles.some((r) => ENTITLEMENT_MUTATE.includes(r));
+  if (loading && !ent) {
     return (
       <Card className="p-6">
-        <EmptyState
-          title="No entitlements yet"
-          body="Feature entitlements appear once the company has an active subscription plan."
-        />
+        <p className="text-sm text-muted">Loading entitlements...</p>
       </Card>
     );
   }
-  const plan = subscription.plan;
+  if (loadError && !ent) {
+    return (
+      <Card className="p-6">
+        <ErrorText>{loadError}</ErrorText>
+      </Card>
+    );
+  }
+  const rows = ent?.ok ? ent.entitlements : [];
+  const planName = ent?.ok ? ent.company.planName : subscription?.plan?.name ?? null;
   return (
     <div className="flex flex-col gap-6">
+      {notice && (
+        <div className="rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm text-success">
+          {notice}
+        </div>
+      )}
       <Card className="p-6">
-        <SectionHeading
-          title={`Plan entitlements - ${plan?.name ?? "Current plan"}`}
-          body="Entitlements included in the membership plan, marked Plan Included."
-        />
-        {subscription.planEntitlements.length === 0 ? (
-          <p className="text-sm text-muted">This plan has no entitlements configured.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {subscription.planEntitlements.map((e) => (
-              <span key={e.key} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-mist px-3 py-1 text-xs font-semibold text-ink">
-                {e.label}
-                <Badge tone="teal">Plan Included</Badge>
-              </span>
-            ))}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Company entitlements</h2>
+            <p className="mt-1 text-sm text-muted">
+              {planName
+                ? `Plan: ${planName} - every feature marked with its source status.`
+                : "Every feature marked with its source status: Plan Included / Admin Granted / Promotional / Temporary / Restricted / Expired."}
+            </p>
           </div>
+          {canMutate && (
+            <Button size="sm" onClick={() => setGrantOpen(true)}>
+              Grant feature access
+            </Button>
+          )}
+        </div>
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted">No entitlements found for this company.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {rows.map((r, i) => (
+              <li
+                key={`${r.key}-${i}`}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-ink">{r.label}</span>
+                    <Badge tone={ENTITLEMENT_STATUS_TONES[r.status] ?? "slate"}>{r.status}</Badge>
+                    {r.scheduled && <Badge tone="navy">Scheduled</Badge>}
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    {r.key}
+                    {r.expiresAt ? ` - expires ${fmtDate2(r.expiresAt)}` : ""}
+                    {r.effectiveFrom && r.scheduled ? ` - starts ${fmtDate2(r.effectiveFrom)}` : ""}
+                    {r.grantedByEmail ? ` - granted by ${r.grantedByEmail}` : ""}
+                  </p>
+                  {r.reason && <p className="mt-1 text-xs text-muted">Reason: {r.reason}</p>}
+                </div>
+                {r.grantId &&
+                  (r.status === "Admin Granted" ||
+                    r.status === "Promotional" ||
+                    r.status === "Temporary") &&
+                  canMutate && (
+                    <Button variant="outline" size="sm" onClick={() => setRevokeRow(r)}>
+                      Revoke
+                    </Button>
+                  )}
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
+      {!canMutate && (
+        <Card className="p-6">
+          <SectionHeading
+            title="Read-only view"
+            body="Grant and revoke actions require an operations, finance or super_admin staff role."
+          />
+        </Card>
+      )}
       <Card className="p-6">
         <SectionHeading
-          title="Admin grants & revokes"
-          body="Manual feature_access_records - visible as Admin Granted / Admin Revoked with any expiry."
+          title="Entitlement audit trail"
+          body="Every grant / revoke / change, from entitlement_audit_logs."
         />
-        {subscription.featureAccess.length === 0 ? (
-          <p className="text-sm text-muted">No manual feature grants yet.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {subscription.featureAccess.map((f) => (
-              <span key={f.key} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-mist px-3 py-1 text-xs font-semibold text-ink">
-                {f.label}
-                <Badge tone={f.granted ? "green" : "red"}>
-                  {f.granted ? "Admin Granted" : "Admin Revoked"}
-                </Badge>
-                {f.effectiveTo && <span className="text-muted">until {fmtDate2(f.effectiveTo)}</span>}
-              </span>
-            ))}
-          </div>
-        )}
-      </Card>
-      <Card className="p-6">
-        <SectionHeading title="Entitlement audit trail" body="Every grant / revoke / change, from entitlement_audit_logs." />
-        {subscription.entitlementAudit.length === 0 ? (
+        {!subscription || subscription.entitlementAudit.length === 0 ? (
           <p className="text-sm text-muted">No entitlement audit entries yet.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
@@ -1617,13 +1731,280 @@ function EntitlementsTab({
                   {e.action} - {e.entitlementKey.replace(/_/g, " ")}
                 </span>
                 <span className="text-xs text-muted">
-                  {e.reason ?? ""} · {fmtDate2(e.createdAt)}
+                  {e.reason ?? ""} - {fmtDate2(e.createdAt)}
                 </span>
               </li>
             ))}
           </ul>
         )}
       </Card>
+      {grantOpen && canMutate && (
+        <GrantEntitlementModal
+          companyId={companyId}
+          companyName={ent?.ok ? ent.company.name : ""}
+          choices={ENTITLEMENT_CHOICES}
+          onClose={() => setGrantOpen(false)}
+          onDone={async (msg) => {
+            setGrantOpen(false);
+            setNotice(msg);
+            await load();
+          }}
+        />
+      )}
+      {revokeRow && canMutate && (
+        <RevokeEntitlementModal
+          companyId={companyId}
+          row={revokeRow}
+          onClose={() => setRevokeRow(null)}
+          onDone={async (msg) => {
+            setRevokeRow(null);
+            setNotice(msg);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function GrantEntitlementModal({
+  companyId,
+  companyName,
+  choices,
+  onClose,
+  onDone,
+}: {
+  companyId: string;
+  companyName: string;
+  choices: { key: string; label: string }[];
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [key, setKey] = useState(choices[0]?.key ?? "");
+  const [customMode, setCustomMode] = useState(false);
+  const [customKey, setCustomKey] = useState("");
+  const [grantType, setGrantType] = useState<"admin_grant" | "promotional" | "temporary">("admin_grant");
+  const [reason, setReason] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
+  const [notify, setNotify] = useState(true);
+  const [review, setReview] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const chosenKey = customMode ? customKey.trim() : key;
+  const chosenLabel =
+    choices.find((c) => c.key === chosenKey)?.label ??
+    chosenKey.replace(/_/g, " ");
+  const execute = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await adminGrantEntitlement({
+      data: {
+        companyId,
+        entitlementKey: chosenKey,
+        grantType,
+        reason: reason.trim(),
+        expiresAt: expiresAt || null,
+        effectiveFrom: effectiveFrom || null,
+        notify,
+      },
+    });
+    setBusy(false);
+    if (!res.ok) setError(res.error);
+    else onDone(res.message);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+        {!review ? (
+          <div className="flex flex-col gap-4">
+            <div>
+              <h3 className="text-lg font-bold">Grant feature access</h3>
+              <p className="mt-1 text-sm text-muted">Company: {companyName}</p>
+            </div>
+            <Field label="Entitlement">
+              {customMode ? (
+                <Input
+                  value={customKey}
+                  onChange={(e) => setCustomKey(e.target.value)}
+                  placeholder="entitlement_key"
+                />
+              ) : (
+                <Select value={key} onChange={(e) => setKey(e.target.value)}>
+                  {choices.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={customMode}
+                onChange={(e) => setCustomMode(e.target.checked)}
+              />
+              Enter a custom entitlement key
+            </label>
+            <Field label="Grant type">
+              <Select
+                value={grantType}
+                onChange={(e) =>
+                  setGrantType(e.target.value as "admin_grant" | "promotional" | "temporary")
+                }
+              >
+                <option value="admin_grant">Admin grant (permanent)</option>
+                <option value="promotional">Promotional</option>
+                <option value="temporary">Temporary (requires expiry)</option>
+              </Select>
+            </Field>
+            <Field label="Reason">
+              <Textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                placeholder="Why is this access being granted?"
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Expiry date (temporary grants)" hint="Optional for admin grant / promotional.">
+                <Input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+              </Field>
+              <Field label="Effective date (scheduling)" hint="Leave empty to apply immediately.">
+                <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={notify}
+                onChange={(e) => setNotify(e.target.checked)}
+              />
+              Notify the company owner
+            </label>
+            {error && <ErrorText>{error}</ErrorText>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!chosenKey || !reason.trim()}
+                onClick={() => setReview(true)}
+              >
+                Review grant
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-xl border border-slate-200 bg-mist/50 p-4">
+              <SectionHeading
+                title="Confirm grant"
+                body="This is written to the audit log and can notify the company owner."
+              />
+              <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <Fact label="Entitlement" value={chosenLabel} />
+                <Fact label="Key" value={chosenKey} />
+                <Fact label="Grant type" value={grantType} />
+                <Fact label="Notify owner" value={notify ? "Yes" : "No"} />
+                {expiresAt && <Fact label="Expires" value={expiresAt} />}
+                {effectiveFrom && <Fact label="Effective" value={effectiveFrom} />}
+              </dl>
+              <p className="mt-3 text-sm text-ink">Reason: {reason}</p>
+            </div>
+            {error && <ErrorText>{error}</ErrorText>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setReview(false)}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => void execute()}
+              >
+                {busy ? "Granting..." : "Confirm grant"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RevokeEntitlementModal({
+  companyId,
+  row,
+  onClose,
+  onDone,
+}: {
+  companyId: string;
+  row: CompanyEntitlementRow;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [notify, setNotify] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const execute = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await adminRevokeEntitlement({
+      data: { companyId, grantId: row.grantId!, reason: reason.trim(), notify },
+    });
+    setBusy(false);
+    if (!res.ok) setError(res.error);
+    else onDone(res.message);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex flex-col gap-4">
+          <div>
+            <h3 className="text-lg font-bold">Revoke {row.label}</h3>
+            <p className="mt-1 text-sm text-muted">
+              Current status: {row.status}. The company owner keeps the audit record of this grant.
+            </p>
+          </div>
+          <Field label="Reason">
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              placeholder="Why is this access being revoked?"
+            />
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={notify}
+              onChange={(e) => setNotify(e.target.checked)}
+            />
+            Notify the company owner
+          </label>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={busy || !reason.trim()}
+              onClick={() => void execute()}
+            >
+              {busy ? "Revoking..." : "Confirm revoke"}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

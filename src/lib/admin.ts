@@ -9,6 +9,8 @@
  * only here and never from client components.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { asService } from "./db";
+import { doGetAdminServiceInsights } from "./admin-platform-core";
 import {
   doAddCaseMessage,
   doAddCompanyNote,
@@ -432,6 +434,23 @@ export const listAdminSubscriptions = createServerFn({ method: "GET" })
 export const getAdminCompanySubscription = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { companyId: string })
   .handler(({ data }) => doGetAdminCompanySubscription(data.companyId));
+
+export const getAdminServiceInsights = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as Record<string, never> | undefined)
+  .handler(async () => {
+    const session = await getAdminSession();
+    if (session.setupRequired || !session.admin) {
+      return { ok: false as const, error: "Admin session required." };
+    }
+    try {
+      const insights = await asService(session.admin.userId, (tx) =>
+        doGetAdminServiceInsights(tx),
+      );
+      return { ok: true as const, insights };
+    } catch (e) {
+      return { ok: false as const, error: String(e) };
+    }
+  });
 
 export const listPartnershipWorkspaces = createServerFn({ method: "GET" })
   .validator((d: unknown) => d as { status: string })

@@ -84,6 +84,8 @@ type TabKey =
   | "subscription"
   | "entitlements"
   | "contracts"
+  | "workspaces"
+  | "client-portals"
   | "opportunities"
   | "documents"
   | "verification"
@@ -101,7 +103,9 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "subscription", label: "Subscription" },
   { key: "entitlements", label: "Feature Entitlements" },
   { key: "contracts", label: "Contracts" },
+  { key: "workspaces", label: "Partnership Workspaces" },
   { key: "opportunities", label: "Opportunities" },
+  { key: "client-portals", label: "Client Portals" },
   { key: "documents", label: "Documents" },
   { key: "verification", label: "Verification" },
   { key: "contacts", label: "Contacts" },
@@ -273,6 +277,8 @@ function CompanyDetailBody({
       {tab === "services" && <ServicesTab relationships={relationships} relationshipsError={relationshipsError} />}
       {tab === "evidence" && <EvidenceTab relationships={relationships} />}
       {tab === "contracts" && <ContractsTab detail={detail} />}
+      {tab === "workspaces" && <WorkspacesTab detail={detail} />}
+      {tab === "client-portals" && <ClientPortalsTab detail={detail} />}
       {tab === "opportunities" && (
         <CatalogueEmptyState
           title="Opportunities"
@@ -373,6 +379,7 @@ function OverviewTab({
             <Fact label="Downgrade eligibility" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "—"} />
             <Fact label="Outstanding invoices" value={outstandingInvoices > 0 ? `${outstandingInvoices}` : "None"} />
             <Fact label="Payment status" value={subscription?.invoices?.[0]?.status ?? "—"} />
+            <Fact label="Active contracts" value={`${detail.contracts.filter((x) => x.status === "active").length}`} />
           </dl>
           {sub && (
             <div className="mt-4">
@@ -492,42 +499,180 @@ function InformationTab({ detail }: { detail: AdminCompanyDetail }) {
 
 // ---------------------------------------------------------------- Contracts
 function ContractsTab({ detail }: { detail: AdminCompanyDetail }) {
+  const contracts = detail.contracts;
+  const leadCount = contracts.filter((c) => c.role === "lead").length;
+  const activeCount = contracts.filter((c) => c.status === "active").length;
   return (
     <div>
       <SectionHeading
         title="Contracts"
-        body="Contract workspaces this company leads or participates in."
+        body="Contract workspaces this company leads or participates in, with value, status and key dates (Master Admin spec §3)."
       />
-      <Card>
-        {detail.contracts.length === 0 ? (
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Card className="p-4">
+          <div className="text-2xl font-bold text-navy">{contracts.length}</div>
+          <div className="text-xs font-semibold text-muted">Total workspaces</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-2xl font-bold text-navy">{leadCount}</div>
+          <div className="text-xs font-semibold text-muted">As lead contractor</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-2xl font-bold text-navy">{activeCount}</div>
+          <div className="text-xs font-semibold text-muted">Active contracts</div>
+        </Card>
+      </div>
+      <Card className="overflow-x-auto">
+        {contracts.length === 0 ? (
           <div className="p-6">
-            <EmptyState title="No contracts linked" body="No contract workspaces reference this company yet." />
+            <EmptyState title="No contract workspaces" body="Contracts this company leads or joins appear here." />
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {detail.contracts.map((w) => (
-              <li key={w.id} className="flex items-center justify-between gap-3 px-5 py-3">
-                <Link
-                  to="/admin/contracts/$workspaceId"
-                  params={{ workspaceId: w.id }}
-                  className="min-w-0 font-semibold text-navy hover:text-brand"
-                >
-                  <span className="block truncate">{w.title}</span>
-                  <span className="block text-xs font-normal text-muted">
-                    created {new Date(w.createdAt).toLocaleDateString()}
-                  </span>
-                </Link>
-                <Badge tone="slate">{WORKSPACE_STATUS_LABELS[w.status]}</Badge>
-              </li>
-            ))}
-          </ul>
+          <table className="w-full min-w-[920px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Contract</th>
+                <th className="px-3 py-3">Role</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Value</th>
+                <th className="px-3 py-3">Start</th>
+                <th className="px-3 py-3">End</th>
+                <th className="px-3 py-3">Participants</th>
+                <th className="px-5 py-3">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {contracts.map((c) => (
+                <tr key={c.id} className="hover:bg-mist/60">
+                  <td className="px-5 py-3">
+                    <Link to={`/admin/contracts/${c.id}`} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.role === "lead" ? <Badge tone="teal">Lead</Badge> : <Badge tone="slate">Participant</Badge>}
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge tone={c.status === "active" ? "green" : "slate"}>{c.status}</Badge>
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "—"}
+                  </td>
+                  <td className="px-3 py-3 text-muted">{c.startDate ? new Date(c.startDate).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-3 text-muted">{c.endDate ? new Date(c.endDate).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-3">{c.participantCount}</td>
+                  <td className="px-5 py-3 text-muted">{new Date(c.createdAt).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </Card>
     </div>
   );
 }
 
-// --------------------------------------------------------------- Documents
+function WorkspacesTab({ detail }: { detail: AdminCompanyDetail }) {
+  return (
+    <div>
+      <SectionHeading
+        title="Partnership Workspaces"
+        body="Contract workspaces this company leads or participates in (Master Admin spec §9)."
+      />
+      <Card className="overflow-x-auto">
+        {detail.contracts.length === 0 ? (
+          <div className="p-6">
+            <EmptyState title="No partnership workspaces" body="Workspaces involving this company appear here." />
+          </div>
+        ) : (
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Workspace</th>
+                <th className="px-3 py-3">Role</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Value</th>
+                <th className="px-3 py-3">Participants</th>
+                <th className="px-5 py-3">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {detail.contracts.map((c) => (
+                <tr key={c.id} className="hover:bg-mist/60">
+                  <td className="px-5 py-3">
+                    <Link to={`/admin/contracts/${c.id}`} className="font-semibold text-navy hover:text-brand">{c.title}</Link>
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.role === "lead" ? <Badge tone="teal">Lead</Badge> : <Badge tone="slate">Participant</Badge>}
+                  </td>
+                  <td className="px-3 py-3"><Badge tone={c.status === "active" ? "green" : "slate"}>{c.status}</Badge></td>
+                  <td className="px-3 py-3">{c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "—"}</td>
+                  <td className="px-3 py-3">{c.participantCount}</td>
+                  <td className="px-5 py-3 text-muted">{new Date(c.createdAt).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
+  const portals = detail.clientPortals;
+  return (
+    <div>
+      <SectionHeading
+        title="Client Portals"
+        body="Buying organisations linked to this company's workspaces (Master Admin spec §9). Client portal plans are not modelled in the schema yet — shown as \"—\"."
+      />
+      <Card className="overflow-x-auto">
+        {portals.length === 0 ? (
+          <div className="p-6">
+            <EmptyState title="No client portals" body="Buying organisations linked to this company's contracts appear here." />
+          </div>
+        ) : (
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Client organisation</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Portal plan</th>
+                <th className="px-3 py-3">Members</th>
+                <th className="px-3 py-3">Contracts</th>
+                <th className="px-5 py-3">Last activity</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {portals.map((o) => (
+                <tr key={o.id} className="hover:bg-mist/60">
+                  <td className="px-5 py-3 font-semibold text-navy">{o.name}</td>
+                  <td className="px-3 py-3"><Badge tone={o.status === "verified" ? "green" : "slate"}>{o.status}</Badge></td>
+                  <td className="px-3 py-3 text-muted">—</td>
+                  <td className="px-3 py-3">{o.memberCount}</td>
+                  <td className="px-3 py-3">
+                    {o.contracts.length === 0 ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <ul className="space-y-0.5">
+                        {o.contracts.map((c) => (
+                          <li key={c.id}>
+                            <Link to={`/admin/contracts/${c.id}`} className="text-brand hover:underline">{c.title}</Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-muted">{o.lastActivity ? new Date(o.lastActivity).toLocaleString() : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function DocumentsTab({ detail }: { detail: AdminCompanyDetail }) {
   return (
     <div>
@@ -886,8 +1031,10 @@ function ServicesTab({
                 <th className="px-3 py-3">Confidence</th>
                 <th className="px-3 py-3">Verification</th>
                 <th className="px-3 py-3">Active</th>
+                <th className="px-3 py-3">In contract</th>
                 <th className="px-3 py-3">Upsell</th>
                 <th className="px-5 py-3">Admin decision</th>
+                <th className="px-5 py-3">Related opportunities</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -921,6 +1068,9 @@ function ServicesTab({
                     )}
                   </td>
                   <td className="px-3 py-3">
+                    {r.usedInContract ? <Badge tone="green">Yes</Badge> : <Badge tone="slate">No</Badge>}
+                  </td>
+                  <td className="px-3 py-3">
                     {r.upsellRecommended ? (
                       <Badge tone="teal">Yes</Badge>
                     ) : (
@@ -929,6 +1079,20 @@ function ServicesTab({
                   </td>
                   <td className="px-5 py-3">
                     <DecisionBadge decision={r.adminDecision} />
+                  </td>
+                  <td className="px-5 py-3">
+                    {r.opportunities.length === 0 ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <ul className="space-y-1">
+                        {r.opportunities.map((o) => (
+                          <li key={o.id} className="flex items-center gap-1.5">
+                            <Badge tone={o.kind === "upsell" ? "teal" : "indigo"}>{o.kind === "upsell" ? "Upsell" : "AI"}</Badge>
+                            <span className="text-xs text-muted">{o.status}{o.confidence ? ` · ${o.confidence}` : ""}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                 </tr>
               ))}

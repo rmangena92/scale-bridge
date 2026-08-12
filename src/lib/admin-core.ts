@@ -738,7 +738,10 @@ export async function doGetCompanyDetail(
             )
          order by d.uploaded_at desc
          limit 100`,
-      tx`select cw.id, cw.title, cw.status, cw.created_at
+      tx`select cw.id, cw.title, cw.status, cw.created_at, cw.contract_value,
+                cw.start_date, cw.end_date, cw.lead_contractor_id,
+                (select count(*)::int from invitations i
+                  where i.workspace_id = cw.id and i.status in ('joined','verified')) as participant_count
          from contract_workspaces cw
          where cw.lead_contractor_id = (select owner_id from companies where id = ${companyId})
             or exists (
@@ -747,6 +750,28 @@ export async function doGetCompanyDetail(
             )
          order by cw.created_at desc
          limit 100`,
+      // Buying organisations linked to this company's workspaces (Stage 2 §3/§9).
+      tx`select o.id, o.name, o.status, o.created_at,
+                (select count(*)::int from client_org_members om where om.org_id = o.id) as member_count,
+                (select max(a.created_at) from audit_logs a where a.client_org_id = o.id) as last_activity,
+                coalesce((select array_agg(cw2.id order by cw2.title)
+                          from contract_clients cc join contract_workspaces cw2 on cw2.id = cc.contract_workspaces_id
+                          where cc.client_org_id = o.id), '{}') as contract_ids,
+                coalesce((select array_agg(cw3.title order by cw3.title)
+                          from contract_clients cc2 join contract_workspaces cw3 on cw3.id = cc2.contract_workspaces_id
+                          where cc2.client_org_id = o.id), '{}') as contract_titles
+         from client_organizations o
+         where o.id in (
+           select cc3.client_org_id from contract_clients cc3
+           where cc3.contract_workspaces_id in (
+             select cw4.id from contract_workspaces cw4
+             where cw4.lead_contractor_id = (select owner_id from companies where id = ${companyId})
+                or exists (select 1 from invitations i2
+                           where i2.workspace_id = cw4.id and i2.company_id = ${companyId})
+           )
+         )
+         order by o.name asc
+         limit 50`,
       tx`select cn.id, cn.company_id, cn.author_user_id, cn.body, cn.created_at, cn.updated_at,
                 u.email as author_email, p.name as author_name
          from company_notes cn
@@ -810,8 +835,14 @@ export async function doGetCompanyDetail(
       id: string;
       title: string;
       status: AdminCompanyDetail["contracts"][number]["status"];
+      contract_value: string | null;
+      start_date: string | null;
+      end_date: string | null;
+      lead_contractor_id: string;
+      participant_count: number;
       created_at: string;
     }[];
+    const ownerRow = (rows[1] as unknown as { owner_id: string }[])[0];
     const noteRows = rows[5] as {
       id: string;
       company_id: string;
@@ -889,10 +920,34 @@ export async function doGetCompanyDetail(
           id: r.id,
           title: r.title,
           status: r.status,
+          role: r.lead_contractor_id === ownerRow?.owner_id ? "lead" : "participant",
+          contractValue: r.contract_value ? Number(r.contract_value) : null,
+          startDate: r.start_date ? String(r.start_date) : null,
+          endDate: r.end_date ? String(r.end_date) : null,
+          participantCount: Number(r.participant_count ?? 0),
           createdAt: String(r.created_at),
         })),
         verificationHistory: verificationRows.map(mapAudit),
         activity: activityRows.map(mapAudit),
+        clientPortals: (rows[8] as {
+          id: string;
+          name: string;
+          status: string;
+          member_count: number;
+          last_activity: string | null;
+          contract_ids: string[] | null;
+          contract_titles: string[] | null;
+        }[]).map((r) => ({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          memberCount: Number(r.member_count ?? 0),
+          lastActivity: r.last_activity ? String(r.last_activity) : null,
+          contracts: (r.contract_ids ?? []).map((cid, i) => ({
+            id: cid,
+            title: (r.contract_titles ?? [])[i] ?? cid,
+          })),
+        })),
         notes: noteRows.map((r) => ({
           id: r.id,
           companyId: r.company_id,

@@ -718,7 +718,10 @@ export type AdminPartnershipWorkspaceRow = {
   contractValue: number | null;
   leadName: string | null;
   leadEmail: string | null;
+  leadCompanyId: string | null;
+  leadCompanyName: string | null;
   clientNames: string[];
+  participantNames: string[];
   participantCount: number;
   packageCount: number;
   createdAt: string;
@@ -745,6 +748,7 @@ export async function doListPartnershipWorkspaces(input: {
     const rows = await asUser(admin.user.id, admin.user.role, (tx) => [
       tx`select cw.id, cw.title, cw.status, cw.industry, cw.location, cw.contract_value,
                 cw.created_at, cw.lead_contractor_id, u.email as lead_email, p.name as lead_name,
+                lc.id as lc_id, lc.name as lc_name,
                 coalesce((select array_agg(co.name order by co.name)
                           from contract_clients cc
                           join client_organizations co on co.id = cc.client_org_id
@@ -756,10 +760,16 @@ export async function doListPartnershipWorkspaces(input: {
          from contract_workspaces cw
          join users u on u.id = cw.lead_contractor_id
          left join profiles p on p.user_id = cw.lead_contractor_id
+         left join companies lc on lc.id = p.company_id
          where ${status} = '' or cw.status = ${status}
          order by cw.created_at desc
          limit 200`,
       tx`select status from contract_workspaces group by status order by status`,
+      tx`select i.workspace_id,
+                coalesce(array_agg(c.name order by c.name) filter (where i.status in ('joined','verified')), '{}') as participant_names
+         from invitations i
+         left join companies c on c.id = i.company_id
+         group by i.workspace_id`,
     ]);
     const list = rows[1] as unknown[];
     const workspaces: AdminPartnershipWorkspaceRow[] = (list as {
@@ -776,6 +786,8 @@ export async function doListPartnershipWorkspaces(input: {
       participant_count: number;
       package_count: number;
       invited_count: number;
+      lc_id: string | null;
+      lc_name: string | null;
     }[]).map((r) => ({
       id: r.id,
       title: r.title,
@@ -785,12 +797,19 @@ export async function doListPartnershipWorkspaces(input: {
       contractValue: r.contract_value ? Number(r.contract_value) : null,
       leadName: r.lead_name,
       leadEmail: r.lead_email,
+      leadCompanyId: r.lc_id,
+      leadCompanyName: r.lc_name,
       clientNames: r.client_names ?? [],
       participantCount: Number(r.participant_count ?? 0),
       packageCount: Number(r.package_count ?? 0),
       createdAt: String(r.created_at),
     }));
     const statuses = (rows[2] as { status: string }[]).map((r) => r.status);
+    const partByName = new Map<string, string[]>();
+    for (const row of rows[3] as { workspace_id: string; participant_names: string[] }[]) {
+      partByName.set(row.workspace_id, row.participant_names ?? []);
+    }
+    for (const w of workspaces) w.participantNames = partByName.get(w.id) ?? [];
     return { ok: true, workspaces, total: workspaces.length, statuses };
   } catch (err) {
     console.error("listPartnershipWorkspaces failed:", err);
@@ -810,6 +829,9 @@ export type AdminClientPortalRow = {
   memberCount: number;
   contractCount: number;
   contractNames: string[];
+  /** Client portal plan. No plan table exists yet — always null, shown as "—". */
+  portalPlan: string | null;
+  lastActivity: string | null;
   createdAt: string;
 };
 
@@ -830,7 +852,8 @@ export async function doListClientPortals(): Promise<AdminClientPortalsResult> {
                 coalesce((select array_agg(cw.title order by cw.title)
                           from contract_clients cc
                           join contract_workspaces cw on cw.id = cc.contract_workspaces_id
-                          where cc.client_org_id = o.id), '{}') as contract_names
+                          where cc.client_org_id = o.id), '{}') as contract_names,
+                (select max(a.created_at) from audit_logs a where a.client_org_id = o.id) as last_activity
          from client_organizations o
          order by o.created_at desc
          limit 200`,
@@ -847,6 +870,7 @@ export async function doListClientPortals(): Promise<AdminClientPortalsResult> {
       created_at: string;
       member_count: number;
       contract_names: string[] | null;
+      last_activity: string | null;
     }[]).map((r) => ({
       id: r.id,
       name: r.name,
@@ -858,6 +882,8 @@ export async function doListClientPortals(): Promise<AdminClientPortalsResult> {
       memberCount: Number(r.member_count ?? 0),
       contractCount: (r.contract_names ?? []).length,
       contractNames: r.contract_names ?? [],
+      portalPlan: null,
+      lastActivity: r.last_activity ? String(r.last_activity) : null,
       createdAt: String(r.created_at),
     }));
     return { ok: true, portals, total: portals.length };

@@ -113,6 +113,17 @@ export type CompanyServiceRow = {
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
+  /** true when company_services.source = 'contract participation'. */
+  usedInContract: boolean;
+  /** Related AI / upsell opportunities pointing at this service for this company. */
+  opportunities: {
+    kind: "upsell" | "ai";
+    id: string;
+    status: string;
+    confidence: string | null;
+    summary: string | null;
+    createdAt: string;
+  }[];
   service: {
     id: string;
     name: string;
@@ -688,6 +699,17 @@ export async function doListCompanyServices(
       created_at: string;
     }[];
 
+    const oppRows = rows[3] as {
+      id: string;
+      service_id: string;
+      status: string;
+      confidence: string | null;
+      relationship: string | null;
+      evidence: string | null;
+      summary: string | null;
+      created_at: string;
+      kind: string;
+    }[];
     const evidenceByRel = new Map<string, ServiceEvidenceRow[]>();
     for (const e of evRows) {
       const list = evidenceByRel.get(e.company_service_id) ?? [];
@@ -705,6 +727,19 @@ export async function doListCompanyServices(
       evidenceByRel.set(e.company_service_id, list);
     }
 
+    const opportunitiesByService = new Map<string, CompanyServiceRow["opportunities"]>();
+    for (const o of oppRows) {
+      const list = opportunitiesByService.get(o.service_id) ?? [];
+      list.push({
+        kind: o.kind === "ai" ? "ai" : "upsell",
+        id: o.id,
+        status: o.status,
+        confidence: o.confidence,
+        summary: o.kind === "ai" ? o.summary : o.relationship,
+        createdAt: String(o.created_at),
+      });
+      opportunitiesByService.set(o.service_id, list);
+    }
     const relationships: CompanyServiceRow[] = (relRows as {
       id: string;
       company_id: string;
@@ -745,6 +780,8 @@ export async function doListCompanyServices(
       reviewedBy: r.reviewed_by,
       reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
       createdAt: String(r.created_at),
+      usedInContract: r.source === "contract participation",
+      opportunities: opportunitiesByService.get(r.service_id) ?? [],
       service: {
         id: r.s_id,
         name: r.s_name,

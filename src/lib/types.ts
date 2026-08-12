@@ -919,7 +919,21 @@ export type AdminCompanyDetail = {
     id: string;
     title: string;
     status: WorkspaceStatus;
+    role: "lead" | "participant";
+    contractValue: number | null;
+    startDate: string | null;
+    endDate: string | null;
+    participantCount: number;
     createdAt: string;
+  }[];
+  /** Buying organisations linked to this company's contract workspaces. */
+  clientPortals: {
+    id: string;
+    name: string;
+    status: string;
+    memberCount: number;
+    lastActivity: string | null;
+    contracts: { id: string; title: string }[];
   }[];
   // Master Admin Portal additions.
   verificationHistory: CompanyAuditEntry[];

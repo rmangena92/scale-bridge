@@ -181,7 +181,7 @@ function CompanyDetailBody({
 
   function guard(): boolean {
     if (!adminCanMutate) {
-      setError("Your role is read-only — changes are not permitted.");
+      setError("Your role is read-only - changes are not permitted.");
       setFlash(null);
       return false;
     }
@@ -228,7 +228,7 @@ function CompanyDetailBody({
             <h1 className="text-2xl font-bold">{c.name}</h1>
             <Badge tone={statusTones[status] ?? "slate"}>{COMPANY_STATUS_LABELS[status]}</Badge>
           </div>
-          <p className="mt-1 text-sm text-muted">{c.type ?? "—"}</p>
+          <p className="mt-1 text-sm text-muted">{c.type ?? "-"}</p>
         </div>
         <Link to="/admin/companies" className="text-sm font-semibold text-brand hover:underline">
           ← Back to companies
@@ -357,10 +357,10 @@ function OverviewTab({
           <SectionHeading title="Key facts" />
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
             <Fact label="Company name" value={c.name} />
-            <Fact label="Industry / type" value={c.type ?? "—"} />
+            <Fact label="Industry / type" value={c.type ?? "-"} />
             <Fact label="Verification status" value={(COMPANY_STATUS_LABELS as Record<string, string>)[status] ?? status} />
-            <Fact label="Contact email" value={c.contactEmail ?? "—"} />
-            <Fact label="Owner" value={c.ownerEmail ?? "—"} />
+            <Fact label="Contact email" value={c.contactEmail ?? "-"} />
+            <Fact label="Owner" value={c.ownerEmail ?? "-"} />
             <Fact label="Registered" value={new Date(c.createdAt).toLocaleDateString()} />
           </dl>
           {c.description && (
@@ -369,16 +369,16 @@ function OverviewTab({
         </Card>
 
         <Card className="p-6">
-          <SectionHeading title="Membership" body={sub ? "Live subscription data — see the Membership tab for full detail." : "No subscription record for this company yet."} />
+          <SectionHeading title="Membership" body={sub ? "Live subscription data - see the Membership tab for full detail." : "No subscription record for this company yet."} />
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Fact label="Current plan" value={plan?.name ?? "—"} />
-            <Fact label="Subscription status" value={sub?.statusLabel ?? "—"} />
-            <Fact label="Started" value={sub?.startedAt ? new Date(sub.startedAt).toLocaleDateString() : "—"} />
-            <Fact label="Next billing" value={sub?.nextBillingDate ? new Date(sub.nextBillingDate).toLocaleDateString() : "—"} />
-            <Fact label="Minimum commitment ends" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "—"} />
-            <Fact label="Downgrade eligibility" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "—"} />
+            <Fact label="Current plan" value={plan?.name ?? "-"} />
+            <Fact label="Subscription status" value={sub?.statusLabel ?? "-"} />
+            <Fact label="Started" value={sub?.startedAt ? new Date(sub.startedAt).toLocaleDateString() : "-"} />
+            <Fact label="Next billing" value={sub?.nextBillingDate ? new Date(sub.nextBillingDate).toLocaleDateString() : "-"} />
+            <Fact label="Minimum commitment ends" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "-"} />
+            <Fact label="Downgrade eligibility" value={minCommit ? new Date(minCommit.commitmentEnd).toLocaleDateString() : "-"} />
             <Fact label="Outstanding invoices" value={outstandingInvoices > 0 ? `${outstandingInvoices}` : "None"} />
-            <Fact label="Payment status" value={subscription?.invoices?.[0]?.status ?? "—"} />
+            <Fact label="Payment status" value={subscription?.invoices?.[0]?.status ?? "-"} />
             <Fact label="Active contracts" value={`${detail.contracts.filter((x) => x.status === "active").length}`} />
           </dl>
           {sub && (
@@ -455,7 +455,7 @@ function OverviewTab({
           )}
         </div>
         <p className="mt-4 text-xs text-muted">
-          {adminCanMutate ? "You can change verification and account status." : "Read-only role — changes are disabled."}
+          {adminCanMutate ? "You can change verification and account status." : "Read-only role - changes are disabled."}
         </p>
       </Card>
     </div>
@@ -476,12 +476,12 @@ function InformationTab({ detail }: { detail: AdminCompanyDetail }) {
   const c = detail.company;
   return (
     <Card className="p-6">
-      <SectionHeading title="Company information" body="Profile fields as registered — read-only here." />
+      <SectionHeading title="Company information" body="Profile fields as registered - read-only here." />
       <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
         <Fact label="Company name" value={c.name} />
-        <Fact label="Industry / type" value={c.type ?? "—"} />
-        <Fact label="Contact email" value={c.contactEmail ?? "—"} />
-        <Fact label="Owner account" value={c.ownerEmail ?? "—"} />
+        <Fact label="Industry / type" value={c.type ?? "-"} />
+        <Fact label="Contact email" value={c.contactEmail ?? "-"} />
+        <Fact label="Owner account" value={c.ownerEmail ?? "-"} />
         <Fact label="Registered" value={new Date(c.createdAt).toLocaleDateString()} />
         <Fact label="Last updated" value={new Date(c.updatedAt).toLocaleDateString()} />
         <Fact label="Verification status" value={COMPANY_STATUS_LABELS[c.verificationStatus] ?? c.verificationStatus} />
@@ -506,7 +506,7 @@ function ContractsTab({ detail }: { detail: AdminCompanyDetail }) {
     <div>
       <SectionHeading
         title="Contracts"
-        body="Contract workspaces this company leads or participates in, with value, status and key dates (Master Admin spec §3)."
+        body="Contract workspaces this company leads or participates in, with value, status and key dates (Master Admin spec section 3)."
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card className="p-4">
@@ -554,10 +554,10 @@ function ContractsTab({ detail }: { detail: AdminCompanyDetail }) {
                     <Badge tone={c.status === "active" ? "green" : "slate"}>{c.status}</Badge>
                   </td>
                   <td className="px-3 py-3">
-                    {c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "—"}
+                    {c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "-"}
                   </td>
-                  <td className="px-3 py-3 text-muted">{c.startDate ? new Date(c.startDate).toLocaleDateString() : "—"}</td>
-                  <td className="px-3 py-3 text-muted">{c.endDate ? new Date(c.endDate).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-3 text-muted">{c.startDate ? new Date(c.startDate).toLocaleDateString() : "-"}</td>
+                  <td className="px-3 py-3 text-muted">{c.endDate ? new Date(c.endDate).toLocaleDateString() : "-"}</td>
                   <td className="px-3 py-3">{c.participantCount}</td>
                   <td className="px-5 py-3 text-muted">{new Date(c.createdAt).toLocaleDateString()}</td>
                 </tr>
@@ -575,7 +575,7 @@ function WorkspacesTab({ detail }: { detail: AdminCompanyDetail }) {
     <div>
       <SectionHeading
         title="Partnership Workspaces"
-        body="Contract workspaces this company leads or participates in (Master Admin spec §9)."
+        body="Contract workspaces this company leads or participates in (Master Admin spec section 9)."
       />
       <Card className="overflow-x-auto">
         {detail.contracts.length === 0 ? (
@@ -604,7 +604,7 @@ function WorkspacesTab({ detail }: { detail: AdminCompanyDetail }) {
                     {c.role === "lead" ? <Badge tone="teal">Lead</Badge> : <Badge tone="slate">Participant</Badge>}
                   </td>
                   <td className="px-3 py-3"><Badge tone={c.status === "active" ? "green" : "slate"}>{c.status}</Badge></td>
-                  <td className="px-3 py-3">{c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "—"}</td>
+                  <td className="px-3 py-3">{c.contractValue != null ? `AED ${Number(c.contractValue).toLocaleString()}` : "-"}</td>
                   <td className="px-3 py-3">{c.participantCount}</td>
                   <td className="px-5 py-3 text-muted">{new Date(c.createdAt).toLocaleDateString()}</td>
                 </tr>
@@ -623,7 +623,7 @@ function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
     <div>
       <SectionHeading
         title="Client Portals"
-        body="Buying organisations linked to this company's workspaces (Master Admin spec §9). Client portal plans are not modelled in the schema yet — shown as \"—\"."
+        body="Buying organisations linked to this company workspaces (Master Admin spec section 9). Client portal plans are not modelled in the schema yet - shown as a dash placeholder."
       />
       <Card className="overflow-x-auto">
         {portals.length === 0 ? (
@@ -647,11 +647,11 @@ function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
                 <tr key={o.id} className="hover:bg-mist/60">
                   <td className="px-5 py-3 font-semibold text-navy">{o.name}</td>
                   <td className="px-3 py-3"><Badge tone={o.status === "verified" ? "green" : "slate"}>{o.status}</Badge></td>
-                  <td className="px-3 py-3 text-muted">—</td>
+                  <td className="px-3 py-3 text-muted">-</td>
                   <td className="px-3 py-3">{o.memberCount}</td>
                   <td className="px-3 py-3">
                     {o.contracts.length === 0 ? (
-                      <span className="text-muted">—</span>
+                      <span className="text-muted">-</span>
                     ) : (
                       <ul className="space-y-0.5">
                         {o.contracts.map((c) => (
@@ -662,7 +662,7 @@ function ClientPortalsTab({ detail }: { detail: AdminCompanyDetail }) {
                       </ul>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-muted">{o.lastActivity ? new Date(o.lastActivity).toLocaleString() : "—"}</td>
+                  <td className="px-5 py-3 text-muted">{o.lastActivity ? new Date(o.lastActivity).toLocaleString() : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -793,7 +793,7 @@ function ContactsTab({ detail }: { detail: AdminCompanyDetail }) {
       </Card>
       <Card className="p-6">
         <SectionHeading title="Company owner" />
-        <p className="text-sm text-ink">{c.ownerEmail ?? "—"}</p>
+        <p className="text-sm text-ink">{c.ownerEmail ?? "-"}</p>
         <p className="mt-1 text-xs text-muted">Owner account ID: {c.ownerId}</p>
         <p className="mt-4 text-sm text-muted">
           Additional named contacts (buyers, project users, guests) arrive with the
@@ -810,7 +810,7 @@ function ActivityTab({ detail }: { detail: AdminCompanyDetail }) {
     <div>
       <SectionHeading
         title="Activity"
-        body="Audit trail for this company — company-scoped events and its contract workspaces."
+        body="Audit trail for this company - company-scoped events and its contract workspaces."
       />
       <Card>
         {detail.activity.length === 0 ? (
@@ -965,7 +965,7 @@ function NotesTab({
       <Card className="h-fit p-6">
         <h2 className="text-lg font-bold">Add a note</h2>
         {!adminCanMutate ? (
-          <p className="mt-2 text-sm text-muted">Read-only role — notes are disabled.</p>
+          <p className="mt-2 text-sm text-muted">Read-only role - notes are disabled.</p>
         ) : (
           <form onSubmit={addNote} className="mt-3 flex flex-col gap-3">
             <Textarea
@@ -1082,7 +1082,7 @@ function ServicesTab({
                   </td>
                   <td className="px-5 py-3">
                     {r.opportunities.length === 0 ? (
-                      <span className="text-muted">—</span>
+                      <span className="text-muted">-</span>
                     ) : (
                       <ul className="space-y-1">
                         {r.opportunities.map((o) => (
@@ -1112,7 +1112,7 @@ function EvidenceTab({ relationships }: { relationships: CompanyServiceRow[] }) 
     <div>
       <SectionHeading
         title="Service evidence"
-        body="Proof rows behind this company\'s relationships — service pages, capability statements, case studies and documents."
+        body="Proof rows behind this company\'s relationships - service pages, capability statements, case studies and documents."
       />
       <Card>
         {rows.length === 0 ? (
@@ -1174,7 +1174,7 @@ function AiInsightsTab({
   return (
     <DecisionList
       title="AI insights"
-      body="AI Service Intelligence discoveries for this company — approve, reject or archive; every decision is audit-logged."
+      body="AI Service Intelligence discoveries for this company - approve, reject or archive; every decision is audit-logged."
       rows={rows}
       adminCanMutate={adminCanMutate}
       onRefresh={onRefresh}
@@ -1201,7 +1201,7 @@ function UpsellsTab({
   return (
     <DecisionList
       title="Upsell opportunities"
-      body="Upsell and cross-sell recommendations for this company — human approval is required before anything is actioned."
+      body="Upsell and cross-sell recommendations for this company - human approval is required before anything is actioned."
       rows={rows}
       adminCanMutate={adminCanMutate}
       onRefresh={onRefresh}
@@ -1321,12 +1321,12 @@ function formatDateTime(iso: string): string {
 
 // ------------------------------------------------------------- Membership
 function fmtDate2(v: string | null | undefined): string {
-  if (!v) return "—";
+  if (!v) return "-";
   const d = new Date(v);
-  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+  return isNaN(d.getTime()) ? "-" : d.toLocaleDateString();
 }
 function fmtAed(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "-";
   return `AED ${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function MembershipTab({
@@ -1359,14 +1359,14 @@ function MembershipTab({
       <Card className="p-6">
         <SectionHeading title="Plan" body="Current membership plan and billing." />
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-          <Fact label="Plan" value={plan?.name ?? "—"} />
+          <Fact label="Plan" value={plan?.name ?? "-"} />
           <Fact label="Price" value={fmtAed(price)} />
           <Fact label="Billing interval" value={sub.billingInterval === "annual" ? "Annual" : "Monthly"} />
           <Fact label="Subscription status" value={sub.statusLabel} />
           <Fact label="Start date" value={fmtDate2(sub.startedAt)} />
           <Fact label="Current billing period" value={`${fmtDate2(sub.currentPeriodStart)} → ${fmtDate2(sub.currentPeriodEnd)}`} />
           <Fact label="Next billing date" value={fmtDate2(sub.nextBillingDate)} />
-          <Fact label="Payment method" value={pm ? `${pm.brand ?? pm.type} •••• ${pm.last4 ?? ""}`.trim() : "—"} />
+          <Fact label="Payment method" value={pm ? `${pm.brand ?? pm.type} •••• ${pm.last4 ?? ""}`.trim() : "-"} />
         </dl>
       </Card>
       <Card className="p-6">
@@ -1407,7 +1407,7 @@ function SubscriptionTab({
       <Card className="p-6">
         <EmptyState
           title="No subscription record"
-          body="Nothing to show yet — this company has not created a subscription."
+          body="Nothing to show yet - this company has not created a subscription."
         />
       </Card>
     );
@@ -1423,21 +1423,21 @@ function SubscriptionTab({
     <div className="flex flex-col gap-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-6">
-          <SectionHeading title="Subscription" body="Read-only management panel — actions arrive with a later stage." />
+          <SectionHeading title="Subscription" body="Read-only management panel - actions arrive with a later stage." />
           <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Fact label="Plan" value={plan?.name ?? "—"} />
+            <Fact label="Plan" value={plan?.name ?? "-"} />
             <Fact label="Billing interval" value={sub.billingInterval === "annual" ? "Annual" : "Monthly"} />
             <Fact label="Status" value={sub.statusLabel} />
             <Fact label="Started" value={fmtDate2(sub.startedAt)} />
             <Fact label="Current period" value={`${fmtDate2(sub.currentPeriodStart)} → ${fmtDate2(sub.currentPeriodEnd)}`} />
             <Fact label="Next billing date" value={fmtDate2(sub.nextBillingDate)} />
             <Fact label="Outstanding balance" value={outstanding > 0 ? `${outstanding} open invoice${outstanding === 1 ? "" : "s"}` : "None"} />
-            <Fact label="Failed payment" value={failedPayment ? "Yes — action required" : "No"} />
-            <Fact label="Pending upgrade" value={pendingUpgrade ? pendingUpgrade.status : "—"} />
-            <Fact label="Pending downgrade" value={pendingDowngrade ? pendingDowngrade.status : "—"} />
-            <Fact label="Cancellation status" value={cancellation ? `${cancellation.status} (${cancellation.mode})` : sub.status === "cancelled" || sub.status === "cancel_at_period_end" ? sub.statusLabel : "—"} />
-            <Fact label="Stripe customer ID" value={subscription.customer?.providerCustomerId ?? "— (sandbox)"} />
-            <Fact label="Stripe subscription ID" value={sub.providerSubscriptionId ?? "— (sandbox)"} />
+            <Fact label="Failed payment" value={failedPayment ? "Yes - action required" : "No"} />
+            <Fact label="Pending upgrade" value={pendingUpgrade ? pendingUpgrade.status : "-"} />
+            <Fact label="Pending downgrade" value={pendingDowngrade ? pendingDowngrade.status : "-"} />
+            <Fact label="Cancellation status" value={cancellation ? `${cancellation.status} (${cancellation.mode})` : sub.status === "cancelled" || sub.status === "cancel_at_period_end" ? sub.statusLabel : "-"} />
+            <Fact label="Stripe customer ID" value={subscription.customer?.providerCustomerId ?? "- (sandbox)"} />
+            <Fact label="Stripe subscription ID" value={sub.providerSubscriptionId ?? "- (sandbox)"} />
           </dl>
         </Card>
         <Card className="p-6">
@@ -1452,7 +1452,7 @@ function SubscriptionTab({
                     {m.brand ?? m.type} •••• {m.last4 ?? ""}
                     {m.expiry ? ` (${m.expiry})` : ""}
                   </span>
-                  <Badge tone="teal">{m.isDefault ? "Default" : "—"}</Badge>
+                  <Badge tone="teal">{m.isDefault ? "Default" : "-"}</Badge>
                 </li>
               ))}
             </ul>
@@ -1567,7 +1567,7 @@ function EntitlementsTab({
     <div className="flex flex-col gap-6">
       <Card className="p-6">
         <SectionHeading
-          title={`Plan entitlements — ${plan?.name ?? "Current plan"}`}
+          title={`Plan entitlements - ${plan?.name ?? "Current plan"}`}
           body="Entitlements included in the membership plan, marked Plan Included."
         />
         {subscription.planEntitlements.length === 0 ? (
@@ -1586,7 +1586,7 @@ function EntitlementsTab({
       <Card className="p-6">
         <SectionHeading
           title="Admin grants & revokes"
-          body="Manual feature_access_records — visible as Admin Granted / Admin Revoked with any expiry."
+          body="Manual feature_access_records - visible as Admin Granted / Admin Revoked with any expiry."
         />
         {subscription.featureAccess.length === 0 ? (
           <p className="text-sm text-muted">No manual feature grants yet.</p>
@@ -1613,7 +1613,7 @@ function EntitlementsTab({
             {subscription.entitlementAudit.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <span className="font-medium text-ink">
-                  {e.action} — {e.entitlementKey.replace(/_/g, " ")}
+                  {e.action} - {e.entitlementKey.replace(/_/g, " ")}
                 </span>
                 <span className="text-xs text-muted">
                   {e.reason ?? ""} · {fmtDate2(e.createdAt)}

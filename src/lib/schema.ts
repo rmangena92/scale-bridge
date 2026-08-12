@@ -2114,4 +2114,665 @@ export const SCHEMA_SQL: string[] = [
   `create index if not exists upsell_opportunities_status_idx on upsell_opportunities (status)`,
   `create index if not exists ai_audit_events_run_idx on ai_audit_events (run_id)`,
   `create index if not exists ai_audit_events_created_idx on ai_audit_events (created_at desc)`,
+
+  // ==================================================================
+  // Subscription & membership system (owner CTO spec 2026-08-12).
+  // Plan-based feature entitlements (never hardcode plan names in feature
+  // checks); billing-provider webhooks are the source of truth for payment
+  // and subscription-state changes. RLS: the owning customer
+  // (customers.user_id = app.user_id) and sb_admin can access subscription
+  // data; a PUBLIC policy exposes only Active plans to the pricing window
+  // (listPublishedPlans). All policy subquery chains below are acyclic:
+  // X -> subscriptions -> customers -> (users — no RLS).
+  // ------------------------------------------------------------------
+  `create table if not exists membership_plans (
+    id uuid primary key default gen_random_uuid(),
+    code text not null unique,
+    name text not null,
+    description text,
+    category text not null default 'partner' check (category in ('partner','anchor')),
+    price_monthly_ael numeric(12,2),
+    price_annual_ael numeric(12,2),
+    billing_intervals text[] not null default array['monthly','annual'],
+    sort_order int not null default 100,
+    status text not null default 'Active' check (status in ('Active','Archived')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists plan_entitlements (
+    id uuid primary key default gen_random_uuid(),
+    plan_id uuid not null references membership_plans(id) on delete cascade,
+    entitlement_key text not null,
+    value jsonb not null default '{"enabled":true}'::jsonb,
+    created_at timestamptz not null default now(),
+    unique (plan_id, entitlement_key)
+  )`,
+  `create table if not exists plan_features (
+    id uuid primary key default gen_random_uuid(),
+    plan_id uuid not null references membership_plans(id) on delete cascade,
+    feature text not null,
+    sort_order int not null default 0,
+    created_at timestamptz not null default now(),
+    unique (plan_id, feature)
+  )`,
+  `create table if not exists customers (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references users(id) on delete cascade,
+    company_id uuid references companies(id) on delete set null,
+    provider_customer_id text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (user_id, company_id)
+  )`,
+  `create table if not exists subscriptions (
+    id uuid primary key default gen_random_uuid(),
+    customer_id uuid not null references customers(id) on delete cascade,
+    plan_id uuid references membership_plans(id) on delete set null,
+    provider_subscription_id text,
+    status text not null default 'pending_plan_selection'
+      check (status in ('pending_plan_selection','checkout_started','payment_pending','active','past_due','payment_failed','upgrade_pending','downgrade_scheduled','cancellation_requested','cancel_at_period_end','cancelled','expired','suspended')),
+    billing_interval text not null default 'monthly' check (billing_interval in ('monthly','annual')),
+    current_period_start timestamptz,
+    current_period_end timestamptz,
+    next_billing_date timestamptz,
+    started_at timestamptz,
+    cancelled_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
+  `create table if not exists subscription_items (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    plan_id uuid not null references membership_plans(id) on delete set null,
+    quantity int not null default 1,
+    unit_amount numeric(12,2) not null default 0,
+    billing_interval text not null default 'monthly' check (billing_interval in ('monthly','annual')),
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists billing_cycles (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    cycle_number int not null,
+    period_start timestamptz not null,
+    period_end timestamptz not null,
+    status text not null default 'Pending' check (status in ('Pending','Paid','Failed','Voided')),
+    amount_ael numeric(12,2) not null default 0,
+    paid_at timestamptz,
+    created_at timestamptz not null default now(),
+    unique (subscription_id, cycle_number)
+  )`,
+  `create table if not exists minimum_commitments (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    commitment_start_date timestamptz not null,
+    commitment_end_date timestamptz not null,
+    cycles_required int not null default 3,
+    completed boolean not null default false,
+    completed_at timestamptz,
+    created_at timestamptz not null default now(),
+    unique (subscription_id, commitment_start_date)
+  )`,
+  `create table if not exists upgrade_requests (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    from_plan_id uuid references membership_plans(id) on delete set null,
+    to_plan_id uuid not null references membership_plans(id) on delete cascade,
+    requested_by uuid references users(id) on delete set null,
+    status text not null default 'Pending' check (status in ('Pending','Confirmed','Completed','Rejected')),
+    requested_at timestamptz not null default now(),
+    effective_date timestamptz,
+    proration_amount_ael numeric(12,2),
+    reason text,
+    resolution_notes text,
+    processed_at timestamptz
+  )`,
+  `create table if not exists downgrade_requests (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    from_plan_id uuid references membership_plans(id) on delete set null,
+    to_plan_id uuid not null references membership_plans(id) on delete cascade,
+    requested_by uuid references users(id) on delete set null,
+    status text not null default 'Pending' check (status in ('Pending','Confirmed','Completed','Rejected')),
+    requested_at timestamptz not null default now(),
+    effective_date timestamptz,
+    proration_amount_ael numeric(12,2),
+    reason text,
+    resolution_notes text,
+    processed_at timestamptz
+  )`,
+  `create table if not exists cancellation_requests (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    requested_by uuid references users(id) on delete set null,
+    status text not null default 'Pending' check (status in ('Pending','Confirmed','Completed','Rejected')),
+    requested_at timestamptz not null default now(),
+    effective_date timestamptz,
+    mode text not null default 'end_of_period' check (mode in ('end_of_period','immediate')),
+    reason text,
+    resolution_notes text,
+    processed_at timestamptz
+  )`,
+  `create table if not exists payment_methods (
+    id uuid primary key default gen_random_uuid(),
+    customer_id uuid not null references customers(id) on delete cascade,
+    provider_payment_method_id text,
+    type text not null default 'card',
+    last4 text,
+    brand text,
+    expiry text,
+    is_default boolean not null default false,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists invoices (
+    id uuid primary key default gen_random_uuid(),
+    customer_id uuid not null references customers(id) on delete cascade,
+    subscription_id uuid references subscriptions(id) on delete set null,
+    invoice_number text not null unique,
+    amount_ael numeric(12,2) not null default 0,
+    tax_ael numeric(12,2) not null default 0,
+    total_ael numeric(12,2) not null default 0,
+    status text not null default 'Draft' check (status in ('Draft','Open','Paid','Failed','Voided')),
+    billing_period_start timestamptz,
+    billing_period_end timestamptz,
+    due_date timestamptz,
+    paid_at timestamptz,
+    provider_invoice_id text,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists payment_events (
+    id uuid primary key default gen_random_uuid(),
+    invoice_id uuid references invoices(id) on delete cascade,
+    event_type text not null check (event_type in ('payment_succeeded','payment_failed','refunded')),
+    amount_ael numeric(12,2),
+    provider_event_id text,
+    occurred_at timestamptz not null default now(),
+    raw jsonb
+  )`,
+  `create table if not exists billing_provider_webhook_events (
+    id uuid primary key default gen_random_uuid(),
+    provider text not null,
+    event_type text not null,
+    event_id text not null unique,
+    payload jsonb not null,
+    received_at timestamptz not null default now(),
+    processed boolean not null default false,
+    processed_at timestamptz,
+    processing_error text
+  )`,
+  `create table if not exists subscription_history (
+    id uuid primary key default gen_random_uuid(),
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    user_id uuid references users(id) on delete set null,
+    previous_plan_id uuid references membership_plans(id) on delete set null,
+    new_plan_id uuid references membership_plans(id) on delete set null,
+    change_type text not null
+      check (change_type in ('created','upgraded','downgraded','cancelled','resumed','expired','suspended','plan_changed')),
+    effective_date timestamptz not null default now(),
+    billing_amount_ael numeric(12,2),
+    proration_amount_ael numeric(12,2),
+    min_commitment_end_date timestamptz,
+    payment_status text,
+    confirmation_status text,
+    source_event text,
+    details jsonb,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists feature_access_records (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid references companies(id) on delete cascade,
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    entitlement_key text not null,
+    granted boolean not null default true,
+    effective_from timestamptz not null default now(),
+    effective_to timestamptz,
+    created_at timestamptz not null default now()
+  )`,
+  `create table if not exists entitlement_audit_logs (
+    id uuid primary key default gen_random_uuid(),
+    company_id uuid references companies(id) on delete cascade,
+    subscription_id uuid not null references subscriptions(id) on delete cascade,
+    actor_user_id uuid references users(id) on delete set null,
+    action text not null check (action in ('granted','revoked','changed')),
+    entitlement_key text not null,
+    previous_value jsonb,
+    new_value jsonb,
+    reason text,
+    created_at timestamptz not null default now()
+  )`,
+  // --- subscriptions RLS: owner (via customers.user_id) or sb_admin. The
+  // customer subquery is acyclic (customers policies reference only users).
+  `alter table membership_plans enable row level security`,
+  `alter table membership_plans force row level security`,
+  `alter table plan_entitlements enable row level security`,
+  `alter table plan_entitlements force row level security`,
+  `alter table plan_features enable row level security`,
+  `alter table plan_features force row level security`,
+  `alter table customers enable row level security`,
+  `alter table customers force row level security`,
+  `alter table subscriptions enable row level security`,
+  `alter table subscriptions force row level security`,
+  `alter table subscription_items enable row level security`,
+  `alter table subscription_items force row level security`,
+  `alter table billing_cycles enable row level security`,
+  `alter table billing_cycles force row level security`,
+  `alter table minimum_commitments enable row level security`,
+  `alter table minimum_commitments force row level security`,
+  `alter table upgrade_requests enable row level security`,
+  `alter table upgrade_requests force row level security`,
+  `alter table downgrade_requests enable row level security`,
+  `alter table downgrade_requests force row level security`,
+  `alter table cancellation_requests enable row level security`,
+  `alter table cancellation_requests force row level security`,
+  `alter table payment_methods enable row level security`,
+  `alter table payment_methods force row level security`,
+  `alter table invoices enable row level security`,
+  `alter table invoices force row level security`,
+  `alter table payment_events enable row level security`,
+  `alter table payment_events force row level security`,
+  `alter table billing_provider_webhook_events enable row level security`,
+  `alter table billing_provider_webhook_events force row level security`,
+  `alter table subscription_history enable row level security`,
+  `alter table subscription_history force row level security`,
+  `alter table feature_access_records enable row level security`,
+  `alter table feature_access_records force row level security`,
+  `alter table entitlement_audit_logs enable row level security`,
+  `alter table entitlement_audit_logs force row level security`,
+  // --- membership_plans: pricing window reads Active plans publicly (the
+  // app connects as scalebridge_app); admins manage the full catalogue.
+  `drop policy if exists membership_plans_select_public on membership_plans`,
+  `create policy membership_plans_select_public on membership_plans
+     for select to scalebridge_app using (status = 'Active')`,
+  `drop policy if exists membership_plans_select on membership_plans`,
+  `create policy membership_plans_select on membership_plans for select using (${IS_ADMIN})`,
+  `drop policy if exists membership_plans_insert on membership_plans`,
+  `create policy membership_plans_insert on membership_plans for insert with check (${IS_ADMIN})`,
+  `drop policy if exists membership_plans_update on membership_plans`,
+  `create policy membership_plans_update on membership_plans for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists membership_plans_delete on membership_plans`,
+  `create policy membership_plans_delete on membership_plans for delete using (${IS_ADMIN})`,
+  // --- plan_entitlements / plan_features: reference data shown on pricing
+  // cards — public read; admins manage.
+  `drop policy if exists plan_entitlements_select_public on plan_entitlements`,
+  `create policy plan_entitlements_select_public on plan_entitlements
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists plan_entitlements_select on plan_entitlements`,
+  `create policy plan_entitlements_select on plan_entitlements for select using (${IS_ADMIN})`,
+  `drop policy if exists plan_entitlements_insert on plan_entitlements`,
+  `create policy plan_entitlements_insert on plan_entitlements for insert with check (${IS_ADMIN})`,
+  `drop policy if exists plan_entitlements_update on plan_entitlements`,
+  `create policy plan_entitlements_update on plan_entitlements for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists plan_entitlements_delete on plan_entitlements`,
+  `create policy plan_entitlements_delete on plan_entitlements for delete using (${IS_ADMIN})`,
+  `drop policy if exists plan_features_select_public on plan_features`,
+  `create policy plan_features_select_public on plan_features
+     for select to scalebridge_app using (true)`,
+  `drop policy if exists plan_features_select on plan_features`,
+  `create policy plan_features_select on plan_features for select using (${IS_ADMIN})`,
+  `drop policy if exists plan_features_insert on plan_features`,
+  `create policy plan_features_insert on plan_features for insert with check (${IS_ADMIN})`,
+  `drop policy if exists plan_features_update on plan_features`,
+  `create policy plan_features_update on plan_features for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists plan_features_delete on plan_features`,
+  `create policy plan_features_delete on plan_features for delete using (${IS_ADMIN})`,
+  // --- customers: the owning user (or sb_admin) only. A user may only
+  // create a customer row for themselves.
+  `drop policy if exists customers_select on customers`,
+  `create policy customers_select on customers for select using (
+    user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists customers_insert on customers`,
+  `create policy customers_insert on customers for insert with check (
+    user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists customers_update on customers`,
+  `create policy customers_update on customers for update using (
+    user_id = ${UID} or ${IS_ADMIN}
+  ) with check (
+    user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  `drop policy if exists customers_delete on customers`,
+  `create policy customers_delete on customers for delete using (
+    user_id = ${UID} or ${IS_ADMIN}
+  )`,
+  // --- subscriptions: owner via customers.user_id, or sb_admin.
+  `drop policy if exists subscriptions_select on subscriptions`,
+  `create policy subscriptions_select on subscriptions for select using (
+    exists (select 1 from customers c where c.id = subscriptions.customer_id and c.user_id = ${UID})
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscriptions_insert on subscriptions`,
+  `create policy subscriptions_insert on subscriptions for insert with check (
+    exists (select 1 from customers c where c.id = subscriptions.customer_id and c.user_id = ${UID})
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscriptions_update on subscriptions`,
+  `create policy subscriptions_update on subscriptions for update using (
+    exists (select 1 from customers c where c.id = subscriptions.customer_id and c.user_id = ${UID})
+    or ${IS_ADMIN}
+  ) with check (
+    exists (select 1 from customers c where c.id = subscriptions.customer_id and c.user_id = ${UID})
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscriptions_delete on subscriptions`,
+  `create policy subscriptions_delete on subscriptions for delete using (
+    exists (select 1 from customers c where c.id = subscriptions.customer_id and c.user_id = ${UID})
+    or ${IS_ADMIN}
+  )`,
+  // --- child rows scoped via their subscription (acyclic chain: child ->
+  // subscriptions -> customers -> users).
+  `drop policy if exists subscription_items_select on subscription_items`,
+  `create policy subscription_items_select on subscription_items for select using (
+    exists (select 1 from subscriptions s where s.id = subscription_items.subscription_id
+      and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = ${UID}))
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscription_items_insert on subscription_items`,
+  `create policy subscription_items_insert on subscription_items for insert with check (
+    exists (select 1 from subscriptions s where s.id = subscription_items.subscription_id
+      and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = ${UID}))
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscription_items_update on subscription_items`,
+  `create policy subscription_items_update on subscription_items for update using (
+    exists (select 1 from subscriptions s where s.id = subscription_items.subscription_id
+      and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = ${UID}))
+    or ${IS_ADMIN}
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = subscription_items.subscription_id
+      and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = ${UID}))
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists subscription_items_delete on subscription_items`,
+  `create policy subscription_items_delete on subscription_items for delete using (
+    exists (select 1 from subscriptions s where s.id = subscription_items.subscription_id
+      and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = ${UID}))
+    or ${IS_ADMIN}
+  )`,
+  `drop policy if exists billing_cycles_select on billing_cycles`,
+  `create policy billing_cycles_select on billing_cycles for select using (
+    exists (select 1 from subscriptions s where s.id = billing_cycles.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists billing_cycles_insert on billing_cycles`,
+  `create policy billing_cycles_insert on billing_cycles for insert with check (
+    exists (select 1 from subscriptions s where s.id = billing_cycles.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists billing_cycles_update on billing_cycles`,
+  `create policy billing_cycles_update on billing_cycles for update using (
+    exists (select 1 from subscriptions s where s.id = billing_cycles.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = billing_cycles.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists billing_cycles_delete on billing_cycles`,
+  `create policy billing_cycles_delete on billing_cycles for delete using (
+    exists (select 1 from subscriptions s where s.id = billing_cycles.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists minimum_commitments_select on minimum_commitments`,
+  `create policy minimum_commitments_select on minimum_commitments for select using (
+    exists (select 1 from subscriptions s where s.id = minimum_commitments.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists minimum_commitments_insert on minimum_commitments`,
+  `create policy minimum_commitments_insert on minimum_commitments for insert with check (
+    exists (select 1 from subscriptions s where s.id = minimum_commitments.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists minimum_commitments_update on minimum_commitments`,
+  `create policy minimum_commitments_update on minimum_commitments for update using (
+    exists (select 1 from subscriptions s where s.id = minimum_commitments.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = minimum_commitments.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists minimum_commitments_delete on minimum_commitments`,
+  `create policy minimum_commitments_delete on minimum_commitments for delete using (
+    exists (select 1 from subscriptions s where s.id = minimum_commitments.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists upgrade_requests_select on upgrade_requests`,
+  `create policy upgrade_requests_select on upgrade_requests for select using (
+    exists (select 1 from subscriptions s where s.id = upgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists upgrade_requests_insert on upgrade_requests`,
+  `create policy upgrade_requests_insert on upgrade_requests for insert with check (
+    exists (select 1 from subscriptions s where s.id = upgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists upgrade_requests_update on upgrade_requests`,
+  `create policy upgrade_requests_update on upgrade_requests for update using (
+    exists (select 1 from subscriptions s where s.id = upgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = upgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists upgrade_requests_delete on upgrade_requests`,
+  `create policy upgrade_requests_delete on upgrade_requests for delete using (
+    exists (select 1 from subscriptions s where s.id = upgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists downgrade_requests_select on downgrade_requests`,
+  `create policy downgrade_requests_select on downgrade_requests for select using (
+    exists (select 1 from subscriptions s where s.id = downgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists downgrade_requests_insert on downgrade_requests`,
+  `create policy downgrade_requests_insert on downgrade_requests for insert with check (
+    exists (select 1 from subscriptions s where s.id = downgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists downgrade_requests_update on downgrade_requests`,
+  `create policy downgrade_requests_update on downgrade_requests for update using (
+    exists (select 1 from subscriptions s where s.id = downgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = downgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists downgrade_requests_delete on downgrade_requests`,
+  `create policy downgrade_requests_delete on downgrade_requests for delete using (
+    exists (select 1 from subscriptions s where s.id = downgrade_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists cancellation_requests_select on cancellation_requests`,
+  `create policy cancellation_requests_select on cancellation_requests for select using (
+    exists (select 1 from subscriptions s where s.id = cancellation_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists cancellation_requests_insert on cancellation_requests`,
+  `create policy cancellation_requests_insert on cancellation_requests for insert with check (
+    exists (select 1 from subscriptions s where s.id = cancellation_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists cancellation_requests_update on cancellation_requests`,
+  `create policy cancellation_requests_update on cancellation_requests for update using (
+    exists (select 1 from subscriptions s where s.id = cancellation_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = cancellation_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists cancellation_requests_delete on cancellation_requests`,
+  `create policy cancellation_requests_delete on cancellation_requests for delete using (
+    exists (select 1 from subscriptions s where s.id = cancellation_requests.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_methods_select on payment_methods`,
+  `create policy payment_methods_select on payment_methods for select using (
+    exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_methods_insert on payment_methods`,
+  `create policy payment_methods_insert on payment_methods for insert with check (
+    exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_methods_update on payment_methods`,
+  `create policy payment_methods_update on payment_methods for update using (
+    exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_methods_delete on payment_methods`,
+  `create policy payment_methods_delete on payment_methods for delete using (
+    exists (select 1 from customers c where c.id = payment_methods.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists invoices_select on invoices`,
+  `create policy invoices_select on invoices for select using (
+    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists invoices_insert on invoices`,
+  `create policy invoices_insert on invoices for insert with check (
+    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists invoices_update on invoices`,
+  `create policy invoices_update on invoices for update using (
+    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists invoices_delete on invoices`,
+  `create policy invoices_delete on invoices for delete using (
+    exists (select 1 from customers c where c.id = invoices.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid)
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_events_select on payment_events`,
+  `create policy payment_events_select on payment_events for select using (
+    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_events_insert on payment_events`,
+  `create policy payment_events_insert on payment_events for insert with check (
+    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_events_update on payment_events`,
+  `create policy payment_events_update on payment_events for update using (
+    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists payment_events_delete on payment_events`,
+  `create policy payment_events_delete on payment_events for delete using (
+    exists (select 1 from invoices i where i.id = payment_events.invoice_id and exists (select 1 from customers c where c.id = i.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists subscription_history_select on subscription_history`,
+  `create policy subscription_history_select on subscription_history for select using (
+    exists (select 1 from subscriptions s where s.id = subscription_history.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists subscription_history_insert on subscription_history`,
+  `create policy subscription_history_insert on subscription_history for insert with check (
+    exists (select 1 from subscriptions s where s.id = subscription_history.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists subscription_history_update on subscription_history`,
+  `create policy subscription_history_update on subscription_history for update using (
+    exists (select 1 from subscriptions s where s.id = subscription_history.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = subscription_history.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists subscription_history_delete on subscription_history`,
+  `create policy subscription_history_delete on subscription_history for delete using (
+    exists (select 1 from subscriptions s where s.id = subscription_history.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists feature_access_records_select on feature_access_records`,
+  `create policy feature_access_records_select on feature_access_records for select using (
+    exists (select 1 from subscriptions s where s.id = feature_access_records.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists feature_access_records_insert on feature_access_records`,
+  `create policy feature_access_records_insert on feature_access_records for insert with check (
+    exists (select 1 from subscriptions s where s.id = feature_access_records.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists feature_access_records_update on feature_access_records`,
+  `create policy feature_access_records_update on feature_access_records for update using (
+    exists (select 1 from subscriptions s where s.id = feature_access_records.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = feature_access_records.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists feature_access_records_delete on feature_access_records`,
+  `create policy feature_access_records_delete on feature_access_records for delete using (
+    exists (select 1 from subscriptions s where s.id = feature_access_records.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists entitlement_audit_logs_select on entitlement_audit_logs`,
+  `create policy entitlement_audit_logs_select on entitlement_audit_logs for select using (
+    exists (select 1 from subscriptions s where s.id = entitlement_audit_logs.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists entitlement_audit_logs_insert on entitlement_audit_logs`,
+  `create policy entitlement_audit_logs_insert on entitlement_audit_logs for insert with check (
+    exists (select 1 from subscriptions s where s.id = entitlement_audit_logs.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists entitlement_audit_logs_update on entitlement_audit_logs`,
+  `create policy entitlement_audit_logs_update on entitlement_audit_logs for update using (
+    exists (select 1 from subscriptions s where s.id = entitlement_audit_logs.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  ) with check (
+    exists (select 1 from subscriptions s where s.id = entitlement_audit_logs.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+  `drop policy if exists entitlement_audit_logs_delete on entitlement_audit_logs`,
+  `create policy entitlement_audit_logs_delete on entitlement_audit_logs for delete using (
+    exists (select 1 from subscriptions s where s.id = entitlement_audit_logs.subscription_id and exists (select 1 from customers c where c.id = s.customer_id and c.user_id = nullif(current_setting('app.user_id', true), '')::uuid))
+    or nullif(current_setting('app.role', true), '') = 'sb_admin'
+  )`,
+
+
+  // --- billing_provider_webhook_events: append-only provider event log.
+  // Insert is open to any authenticated server scope because the sandbox
+  // webhook path runs in the acting user's RLS scope (no session exists for a
+  // provider callback); the real Stripe endpoint will be admin-scoped and
+  // signature-verified before anything reaches the DB. Read is sb_admin only
+  // (internal events never visible to tenants).
+  `drop policy if exists billing_provider_webhook_events_select on billing_provider_webhook_events`,
+  `create policy billing_provider_webhook_events_select on billing_provider_webhook_events for select using (${IS_ADMIN})`,
+  `drop policy if exists billing_provider_webhook_events_insert on billing_provider_webhook_events`,
+  `create policy billing_provider_webhook_events_insert on billing_provider_webhook_events for insert with check (true)`,
+  `drop policy if exists billing_provider_webhook_events_update on billing_provider_webhook_events`,
+  `create policy billing_provider_webhook_events_update on billing_provider_webhook_events for update using (true) with check (true)`,
+  // --- subscription & billing indexes.
+  `create index if not exists customers_user_idx on customers (user_id)`,
+  `create index if not exists customers_company_idx on customers (company_id)`,
+  `create index if not exists subscriptions_customer_idx on subscriptions (customer_id)`,
+  `create index if not exists subscriptions_status_idx on subscriptions (status)`,
+  `create index if not exists subscription_items_sub_idx on subscription_items (subscription_id)`,
+  `create index if not exists billing_cycles_sub_idx on billing_cycles (subscription_id)`,
+  `create index if not exists minimum_commitments_sub_idx on minimum_commitments (subscription_id)`,
+  `create index if not exists upgrade_requests_sub_idx on upgrade_requests (subscription_id)`,
+  `create index if not exists downgrade_requests_sub_idx on downgrade_requests (subscription_id)`,
+  `create index if not exists cancellation_requests_sub_idx on cancellation_requests (subscription_id)`,
+  `create index if not exists payment_methods_customer_idx on payment_methods (customer_id)`,
+  `create index if not exists invoices_customer_idx on invoices (customer_id)`,
+  `create index if not exists invoices_sub_idx on invoices (subscription_id)`,
+  `create index if not exists payment_events_invoice_idx on payment_events (invoice_id)`,
+  `create index if not exists webhook_events_received_idx on billing_provider_webhook_events (received_at desc)`,
+  `create index if not exists subscription_history_sub_idx on subscription_history (subscription_id, created_at desc)`,
+  `create index if not exists feature_access_sub_idx on feature_access_records (subscription_id)`,
+  `create index if not exists entitlement_audit_sub_idx on entitlement_audit_logs (subscription_id)`,
+
 ];

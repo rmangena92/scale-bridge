@@ -83,6 +83,25 @@ export function intervalLabel(interval: "monthly" | "annual"): string {
   return interval === "annual" ? "per year (annual billing)" : "per month (monthly billing)";
 }
 
+/**
+ * Estimated next billing date for a checkout about to start: activation + 1
+ * billing cycle (monthly → +1 month, annual → +12 months).
+ */
+export function estimatedNextBilling(interval: "monthly" | "annual"): string {
+  const d = new Date();
+  const months = interval === "annual" ? 12 : 1;
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 /** Estimated downgrade-eligibility date for a checkout about to start: now + 3 cycles. */
 export function estimatedCommitmentEnd(interval: "monthly" | "annual"): string {
   const d = new Date();

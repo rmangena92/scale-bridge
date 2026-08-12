@@ -23,7 +23,9 @@ import {
   COMMITMENT_NOTICE,
   MembershipStepper,
   estimatedCommitmentEnd,
+  estimatedNextBilling,
   formatAed,
+  formatDate,
   gateDestination,
   intervalLabel,
 } from "~/lib/membership";
@@ -32,7 +34,11 @@ export const Route = createFileRoute("/membership-checkout")({
   validateSearch: (search: Record<string, unknown>) => ({
     plan: typeof search.plan === "string" ? search.plan : undefined,
     interval:
-      search.interval === "annual" ? ("annual" as const) : ("monthly" as const),
+      search.interval === "annual"
+        ? ("annual" as const)
+        : search.interval === "monthly"
+          ? ("monthly" as const)
+          : undefined,
     resume: typeof search.resume === "string" ? search.resume : undefined,
   }),
   loaderDeps: ({ search }) => ({
@@ -64,9 +70,15 @@ export const Route = createFileRoute("/membership-checkout")({
       if (dest.kind === "recovery") throw redirect({ to: "/billing-recovery" });
       if (dest.kind === "dashboard") throw redirect({ to: "/app" });
     }
-    // Resuming: fall back to the pending selection carried by the subscription.
-    const planId = search.plan ?? (gate?.hasSubscription ? (gate.planId ?? undefined) : undefined);
-    const interval: BillingInterval = gate?.hasSubscription && !search.interval ? gate.interval : search.interval;
+    // Plan + interval resolution. Explicit search params win; otherwise fall
+    // back to the pending selection carried by the subscription (resume flow),
+    // then to safe defaults. The page must render correctly even when search
+    // params are missing on the client (hydration/loaderDeps quirks) — this
+    // route never redirects to /membership; the component renders a recovery
+    // state instead when no plan can be resolved.
+    const planId = search.plan ?? gate?.planId ?? undefined;
+    const interval: BillingInterval =
+      search.interval ?? gate?.interval ?? "monthly";
     return {
       setupRequired: false as const,
       user: session.user,
@@ -278,6 +290,16 @@ function ReviewStep({
           </dt>
           <dd className="mt-0.5 text-sm text-ink">
             Taken now — {price === null ? "custom amount" : formatAed(price)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Next billing date
+          </dt>
+          <dd className="mt-0.5 text-sm text-ink">
+            {gate?.nextBillingDate
+              ? formatDate(gate.nextBillingDate)
+              : `${estimatedNextBilling(interval)} (estimated)`}
           </dd>
         </div>
         <div>

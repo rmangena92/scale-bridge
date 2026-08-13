@@ -226,8 +226,17 @@ function AiRunDetailPage() {
           </div>
           <div className="bg-white px-5 py-4">
             <p className="text-xs font-bold uppercase tracking-widest text-muted">Cost</p>
-            <p className="mt-1 text-sm font-medium text-muted">
-              {run.costUsd !== null ? `$${run.costUsd.toFixed(4)}` : "Not tracked (cost monitoring lands in a later phase)"}
+            <p className="mt-1 text-sm font-medium text-ink">
+              {run.costUsd !== null ? (
+                <>
+                  {"$" + run.costUsd.toFixed(4)}
+                  <span className="block text-xs text-muted">
+                    {run.tokens !== null ? `${run.tokens.toLocaleString("en-GB")} tokens (estimated)` : ""}
+                  </span>
+                </>
+              ) : (
+                <span className="text-muted">Not tracked — no cost recorded for this run.</span>
+              )}
             </p>
           </div>
         </div>

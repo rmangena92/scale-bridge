@@ -81,6 +81,7 @@ export type AiRunListRow = {
   createdAt: string;
   durationSec: number | null;
   costUsd: number | null;
+  tokens: number | null;
 };
 
 export type AiAuditRow = {
@@ -272,27 +273,34 @@ export async function doGetAiControlsOverview(admin: AdminActor): Promise<AiCont
       updatedAt: r.updated_at ? String(r.updated_at) : null,
     }));
 
-    const runs: AiRunListRow[] = runRows.map((r) => ({
-      id: r.id,
-      companyId: r.company_id,
-      companyName: r.company_name,
-      trigger: r.trigger,
-      status: r.status,
-      agentVersion: r.agent_version,
-      promptModel: r.prompt_model,
-      startedAt: r.started_at ? String(r.started_at) : null,
-      finishedAt: r.finished_at ? String(r.finished_at) : null,
-      error: r.error,
-      runMetadata: (r.run_metadata ?? {}) as AiRunMetadata,
-      createdAt: String(r.created_at),
-      durationSec:
-        r.started_at && r.finished_at
-          ? Math.max(0, Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000))
-          : null,
-      // The engine does not track per-run cost yet (Phase 2 adds cost
-      // monitoring); surface the field so the UI shows it honestly as untracked.
-      costUsd: null,
-    }));
+    const runs: AiRunListRow[] = runRows.map((r) => {
+      const md = (r.run_metadata ?? {}) as AiRunMetadata & { tokens?: number; estimatedCostUsd?: number };
+      return {
+        id: r.id,
+        companyId: r.company_id,
+        companyName: r.company_name,
+        trigger: r.trigger,
+        status: r.status,
+        agentVersion: r.agent_version,
+        promptModel: r.prompt_model,
+        startedAt: r.started_at ? String(r.started_at) : null,
+        finishedAt: r.finished_at ? String(r.finished_at) : null,
+        error: r.error,
+        runMetadata: (r.run_metadata ?? {}) as AiRunMetadata,
+        createdAt: String(r.created_at),
+        durationSec:
+          r.started_at && r.finished_at
+            ? Math.max(0, Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000))
+            : null,
+        // Per-run cost tracking (Phase 2b): surfaced from run_metadata where the
+        // engine recorded it (completed runs only).
+        costUsd:
+          typeof md.estimatedCostUsd === "number" && Number.isFinite(md.estimatedCostUsd)
+            ? md.estimatedCostUsd
+            : null,
+        tokens: typeof md.tokens === "number" && Number.isFinite(md.tokens) ? md.tokens : null,
+      };
+    });
 
     const auditEvents: AiAuditRow[] = auditRows.map((a) => ({
       id: a.id,
@@ -423,6 +431,7 @@ export async function doGetAiRunDetail(admin: AdminActor, runId: string): Promis
     ];
     const r = runRows[0];
     if (!r) return { ok: false, error: "AI run not found." };
+    const md = (r.run_metadata ?? {}) as AiRunMetadata & { tokens?: number; estimatedCostUsd?: number };
     return {
       ok: true,
       run: {
@@ -442,7 +451,11 @@ export async function doGetAiRunDetail(admin: AdminActor, runId: string): Promis
           r.started_at && r.finished_at
             ? Math.max(0, Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000))
             : null,
-        costUsd: null,
+        costUsd:
+          typeof md.estimatedCostUsd === "number" && Number.isFinite(md.estimatedCostUsd)
+            ? md.estimatedCostUsd
+            : null,
+        tokens: typeof md.tokens === "number" && Number.isFinite(md.tokens) ? md.tokens : null,
       },
       recommendations: recRows.map((rec) => ({
         id: rec.id,
@@ -747,5 +760,296 @@ export async function doUpdateAiControlSettings(
   } catch (err) {
     console.error("doUpdateAiControlSettings failed:", err);
     return { ok: false, error: err instanceof Error ? err.message : "Could not save the engine limits." };
+  }
+}
+
+// -------------------------------------------------------- cost monitoring
+// AI Controls Phase 2b: read-only per-run cost overview. Token counts and
+// estimated cost live in ai_agent_runs.run_metadata (recorded by the engine
+// on completed runs — see estimateRunCost in ai-agent.ts). All reads run
+// through asUser(admin, 'sb_admin') because the AI tables are FORCE RLS.
+
+export type AiCostByModelRow = {
+  model: string;
+  runs: number;
+  tokens: number;
+  costUsd: number;
+};
+
+export type AiRecentCostRow = {
+  runId: string;
+  companyId: string;
+  companyName: string | null;
+  model: string;
+  status: string;
+  tokens: number | null;
+  costUsd: number | null;
+  createdAt: string;
+};
+
+export type AiCostOverviewResult =
+  | {
+      ok: true;
+      totalCostUsd: number;
+      totalTokens: number;
+      runsTracked: number;
+      runsTotal: number;
+      byModel: AiCostByModelRow[];
+      recent: AiRecentCostRow[];
+    }
+  | { ok: false; error: string };
+
+export async function doGetAiCostOverview(admin: AdminActor): Promise<AiCostOverviewResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED" };
+  try {
+    await ensureSchema();
+    const [, totals, byModel, recent] = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select
+          coalesce(sum((run_metadata->>'estimatedCostUsd')::numeric), 0) as total_cost,
+          coalesce(sum((run_metadata->>'tokens')::int), 0) as total_tokens,
+          count(*) filter (where run_metadata ? 'estimatedCostUsd')::int as runs_tracked,
+          count(*)::int as runs_total
+         from ai_agent_runs`,
+      tx`select coalesce(prompt_model, 'unknown') as model,
+                count(*)::int as runs,
+                coalesce(sum((run_metadata->>'tokens')::int), 0) as tokens,
+                coalesce(sum((run_metadata->>'estimatedCostUsd')::numeric), 0) as cost
+         from ai_agent_runs
+         group by 1
+         order by cost desc`,
+      tx`select r.id, r.company_id, c.name as company_name,
+                coalesce(r.prompt_model, 'unknown') as model, r.status,
+                (r.run_metadata->>'tokens')::int as tokens,
+                (r.run_metadata->>'estimatedCostUsd')::numeric as cost,
+                r.created_at
+         from ai_agent_runs r
+         left join companies c on c.id = r.company_id
+         where r.run_metadata ? 'estimatedCostUsd'
+         order by r.created_at desc
+         limit 10`,
+    ])) as unknown as [
+      unknown,
+      { total_cost: unknown; total_tokens: number; runs_tracked: number; runs_total: number }[],
+      { model: string; runs: number; tokens: number; cost: unknown }[],
+      {
+        id: string;
+        company_id: string;
+        company_name: string | null;
+        model: string;
+        status: string;
+        tokens: number | null;
+        cost: unknown;
+        created_at: string;
+      }[],
+    ];
+    const t = totals[0] ?? { total_cost: 0, total_tokens: 0, runs_tracked: 0, runs_total: 0 };
+    return {
+      ok: true,
+      totalCostUsd: num(t.total_cost),
+      totalTokens: num(t.total_tokens),
+      runsTracked: num(t.runs_tracked),
+      runsTotal: num(t.runs_total),
+      byModel: byModel.map((m) => ({
+        model: m.model,
+        runs: num(m.runs),
+        tokens: num(m.tokens),
+        costUsd: num(m.cost),
+      })),
+      recent: recent.map((r) => ({
+        runId: r.id,
+        companyId: r.company_id,
+        companyName: r.company_name,
+        model: r.model,
+        status: r.status,
+        tokens: r.tokens === null ? null : num(r.tokens),
+        costUsd: r.cost === null ? null : num(r.cost),
+        createdAt: String(r.created_at),
+      })),
+    };
+  } catch (err) {
+    console.error("doGetAiCostOverview failed:", err);
+    return { ok: false, error: "Could not load the AI cost overview." };
+  }
+}
+
+// ----------------------------------------------------- company AI data purge
+// AI Controls Phase 2b: delete EVERYTHING the AI engine holds for one company
+// (runs, their audit events, recommendations, upsell opportunities,
+// data-source permissions, AI preferences and AI-created evidence rows) with a
+// typed confirmation + admin reason, dual-audited immutably in the same
+// transaction. Idempotent: a company with no AI data returns zero counts.
+// Non-AI company data (profile, catalogue, contracts) is never touched.
+
+export type AiDeleteAiDataResult =
+  | {
+      ok: true;
+      message: string;
+      deleted: {
+        runs: number;
+        auditEvents: number;
+        recommendations: number;
+        upsells: number;
+        permissions: number;
+        preferences: number;
+        evidence: number;
+      };
+    }
+  | { ok: false; error: string; code?: string };
+
+export async function doDeleteCompanyAiData(
+  admin: AdminActor,
+  companyId: string,
+  confirmName: string,
+  reason: string,
+): Promise<AiDeleteAiDataResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED" };
+  const denied = requireAiControlMutate(admin);
+  if (denied) return { ok: false, error: denied, code: "ROLE_DENIED" };
+  if (!companyId) return { ok: false, error: "Company is required." };
+  const rsn = (reason ?? "").trim().slice(0, 1000);
+  if (!rsn) return { ok: false, error: "An admin reason is required.", code: "REASON_REQUIRED" };
+  try {
+    await ensureSchema();
+    const compRows = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select id, name from companies where id = ${companyId} limit 1`,
+    ]))[1] as { id: string; name: string }[];
+    const comp = compRows[0];
+    if (!comp) return { ok: false, error: "Company not found." };
+    const typed = (confirmName ?? "").trim();
+    if (typed.toLowerCase() !== comp.name.trim().toLowerCase()) {
+      return { ok: false, error: "Typed confirmation does not match the company name.", code: "CONFIRM_MISMATCH" };
+    }
+
+    // Capture the run ids + category counts first (needed to scope the audit
+    // deletion and to record exactly what will be removed), then delete
+    // everything + dual-audit in ONE transaction with exact counts from
+    // RETURNING. The new audit rows carry entity_type 'company' (run_id null)
+    // so the run-scoped audit deletions can never remove the record of this
+    // action. Idempotent: a company with no AI data yields all-zero counts.
+    const [, runRows, countRows] = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select id from ai_agent_runs where company_id = ${companyId}`,
+      tx`select
+          (select count(*)::int from ai_audit_events
+            where run_id in (select id from ai_agent_runs where company_id = ${companyId})
+               or (entity_type = 'ai_agent_run'
+                   and entity_id in (select id::text from ai_agent_runs where company_id = ${companyId}))
+               or (entity_type = 'company' and entity_id = ${companyId})) as audit_events,
+          (select count(*)::int from ai_recommendations where company_id = ${companyId}) as recommendations,
+          (select count(*)::int from upsell_opportunities where company_id = ${companyId}) as upsells,
+          (select count(*)::int from service_evidence
+            where company_service_id in (
+              select id from company_services
+              where company_id = ${companyId} and source = 'AI discovery')) as evidence,
+          (select count(*)::int from ai_data_source_permissions where company_id = ${companyId}) as permissions,
+          (select count(*)::int from company_ai_preferences where company_id = ${companyId}) as preferences`,
+    ])) as unknown as [
+      unknown,
+      { id: string }[],
+      {
+        audit_events: number;
+        recommendations: number;
+        upsells: number;
+        evidence: number;
+        permissions: number;
+        preferences: number;
+      }[],
+    ];
+    const runIds = runRows.map((r) => r.id);
+    const runIdStrs = runIds.map(String);
+    const expected = countRows[0] ?? {
+      audit_events: 0,
+      recommendations: 0,
+      upsells: 0,
+      evidence: 0,
+      permissions: 0,
+      preferences: 0,
+    };
+
+    const [, auditByRun, auditByEntity, auditByCompany, recs, upsells, evidence, perms, prefs, runs] =
+      (await asUser(admin.id, "sb_admin", (tx) => [
+        tx`delete from ai_audit_events where run_id = any(${runIds}) returning id`,
+        tx`delete from ai_audit_events
+           where entity_type = 'ai_agent_run' and entity_id = any(${runIdStrs})
+           returning id`,
+        tx`delete from ai_audit_events
+           where entity_type = 'company' and entity_id = ${companyId}
+           returning id`,
+        tx`delete from ai_recommendations where company_id = ${companyId} returning id`,
+        tx`delete from upsell_opportunities where company_id = ${companyId} returning id`,
+        tx`delete from service_evidence
+           where company_service_id in (
+             select id from company_services
+             where company_id = ${companyId} and source = 'AI discovery')
+           returning id`,
+        tx`delete from ai_data_source_permissions where company_id = ${companyId} returning id`,
+        tx`delete from company_ai_preferences where company_id = ${companyId} returning id`,
+        tx`delete from ai_agent_runs where company_id = ${companyId} returning id`,
+        aiControlAuditQuery(tx, admin.id, "ai.control.company_data_deleted", {
+          companyId,
+          companyName: comp.name,
+          reason: rsn,
+          deleted: {
+            runs: runIds.length,
+            auditEvents: num(expected.audit_events),
+            recommendations: num(expected.recommendations),
+            upsells: num(expected.upsells),
+            permissions: num(expected.permissions),
+            preferences: num(expected.preferences),
+            evidence: num(expected.evidence),
+          },
+        }),
+        aiAuditQuery(tx, {
+          actorType: "admin",
+          actorId: admin.id,
+          action: "ai.control.company_data_deleted",
+          entityType: "company",
+          entityId: companyId,
+          details: {
+            companyName: comp.name,
+            reason: rsn,
+            deleted: {
+              runs: runIds.length,
+              auditEvents: num(expected.audit_events),
+              recommendations: num(expected.recommendations),
+              upsells: num(expected.upsells),
+              permissions: num(expected.permissions),
+              preferences: num(expected.preferences),
+              evidence: num(expected.evidence),
+            },
+          },
+        }),
+      ])) as unknown as [
+      unknown,
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+    ];
+
+    const deleted = {
+      runs: runs.length,
+      auditEvents: auditByRun.length + auditByEntity.length + auditByCompany.length,
+      recommendations: recs.length,
+      upsells: upsells.length,
+      permissions: perms.length,
+      preferences: prefs.length,
+      evidence: evidence.length,
+    };
+    return {
+      ok: true,
+      message:
+        `Deleted AI data for ${comp.name}: ${deleted.runs} run(s), ${deleted.auditEvents} audit event(s), ` +
+        `${deleted.recommendations} recommendation(s), ${deleted.upsells} upsell(s), ` +
+        `${deleted.permissions} permission(s), ${deleted.preferences} preference(s), ${deleted.evidence} evidence row(s).`,
+      deleted,
+    };
+  } catch (err) {
+    console.error("doDeleteCompanyAiData failed:", err);
+    return { ok: false, error: "Could not delete the company's AI data." };
   }
 }

@@ -4,8 +4,10 @@ import {
   AI_CONTROL_MUTATE_ROLES,
   AI_CONTROL_SETTING_FIELDS,
   AI_RUN_STATUS_LABELS,
+  deleteCompanyAiData,
   getAdminAiControlSettings,
   getAdminAiControls,
+  getAdminAiCostOverview,
   getAdminSession,
   retryAiRun,
   setAiDataSourceEnabled,
@@ -14,6 +16,7 @@ import {
 import type {
   AiAuditRow,
   AiControlSettingsRow,
+  AiCostOverviewResult,
   AiDataSourceRow,
   AiOptOutRow,
   AiRunListRow,
@@ -23,15 +26,17 @@ import { Badge, Button, Card, DbSetupPage, EmptyState, ErrorText } from "~/compo
 export const Route = createFileRoute("/admin/ai/")({
   loader: async () => {
     const session = await getAdminSession();
-    const [result, settingsResult] = await Promise.all([
+    const [result, settingsResult, costsResult] = await Promise.all([
       getAdminAiControls(),
       getAdminAiControlSettings(),
+      getAdminAiCostOverview(),
     ]);
     return {
       setupRequired: session.setupRequired,
       admin: session.admin,
       result: result as Awaited<ReturnType<typeof getAdminAiControls>>,
       settingsResult: settingsResult as Awaited<ReturnType<typeof getAdminAiControlSettings>>,
+      costsResult: costsResult as Awaited<ReturnType<typeof getAdminAiCostOverview>>,
     };
   },
   component: AiControlsPage,
@@ -57,6 +62,17 @@ function statusTone(s: string): "green" | "red" | "amber" | "slate" | "blue" | "
   if (s === "running") return "blue";
   if (s === "queued") return "amber";
   return "slate";
+}
+
+/** Format a USD amount: sub-cent values keep 4 decimals, larger values 2. */
+function formatUsd(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "-";
+  return "$" + (n < 1 ? n.toFixed(4) : n.toFixed(2));
+}
+
+function formatTokens(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "-";
+  return n.toLocaleString("en-GB");
 }
 
 function toggleTone(v: boolean): "green" | "red" | "amber" | "slate" | "blue" | "teal" | "navy" {
@@ -442,7 +458,18 @@ function RunHistoryCard({ runs, canMutate }: { runs: AiRunListRow[]; canMutate: 
                   <td className="px-4 py-3 text-muted">
                     {r.durationSec !== null ? `${r.durationSec}s` : "-"}
                   </td>
-                  <td className="px-4 py-3 text-muted">{r.costUsd !== null ? `$${r.costUsd.toFixed(4)}` : "-"}</td>
+                  <td className="px-4 py-3 text-muted">
+                    {r.costUsd !== null ? (
+                      <>
+                        <span className="font-medium text-ink">{formatUsd(r.costUsd)}</span>
+                        <span className="block text-xs">
+                          {r.tokens !== null ? `${formatTokens(r.tokens)} tokens` : ""}
+                        </span>
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted">{formatDate(r.createdAt)}</td>
                   <td className="px-4 py-3">
                     {r.status === "failed" ? (
@@ -470,6 +497,266 @@ function RunHistoryCard({ runs, canMutate }: { runs: AiRunListRow[]; canMutate: 
           <p className="text-xs text-muted">{feedback?.ok ? feedback.text : ""}</p>
         </div>
       )}
+    </Card>
+  );
+}
+
+function CostsCard({ costs }: { costs: AiCostOverviewResult }) {
+  if (!costs.ok) {
+    return (
+      <Card className="px-4 py-3">
+        <ErrorText>{costs.error}</ErrorText>
+      </Card>
+    );
+  }
+  const topCost = Math.max(...costs.byModel.map((m) => m.costUsd), 0);
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-bold text-ink">Costs</h2>
+        <p className="mt-1 text-sm text-muted">
+          Estimated AI spend, read-only. The agent is a deterministic engine (no external model
+          calls), so token counts and cost are modeled estimates recorded per completed run — see the
+          run metadata for the exact method. Failed, queued and rate-limited runs accrue no cost.
+        </p>
+      </div>
+      <div className="grid gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-muted">Total estimated cost</p>
+          <p className="mt-1 text-2xl font-bold text-ink">{formatUsd(costs.totalCostUsd)}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-muted">Total tokens</p>
+          <p className="mt-1 text-2xl font-bold text-ink">{formatTokens(costs.totalTokens)}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-muted">Runs with cost tracked</p>
+          <p className="mt-1 text-2xl font-bold text-ink">{costs.runsTracked}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-muted">Total runs</p>
+          <p className="mt-1 text-2xl font-bold text-ink">{costs.runsTotal}</p>
+        </div>
+      </div>
+      <div className="border-t border-slate-100 px-5 py-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Cost by model</h3>
+        {costs.byModel.length === 0 ? (
+          <p className="mt-2 text-sm text-muted">No runs have recorded costs yet.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-4 py-3">Model</th>
+                  <th className="px-4 py-3">Runs</th>
+                  <th className="px-4 py-3">Tokens</th>
+                  <th className="px-4 py-3">Est. cost</th>
+                  <th className="px-4 py-3">Share</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {costs.byModel.map((m) => (
+                  <tr key={m.model} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-mono text-xs text-ink">{m.model}</td>
+                    <td className="px-4 py-3 text-muted">{m.runs}</td>
+                    <td className="px-4 py-3 text-muted">{formatTokens(m.tokens)}</td>
+                    <td className="px-4 py-3 font-medium text-ink">{formatUsd(m.costUsd)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-teal"
+                            style={{ width: `${topCost > 0 ? Math.max(4, (m.costUsd / topCost) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted">
+                          {costs.totalCostUsd > 0 ? `${((m.costUsd / costs.totalCostUsd) * 100).toFixed(1)}%` : "-"}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <div className="border-t border-slate-100 px-5 py-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-muted">Recent runs with cost</h3>
+        {costs.recent.length === 0 ? (
+          <p className="mt-2 text-sm text-muted">No runs have recorded costs yet.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-4 py-3">Company</th>
+                  <th className="px-4 py-3">Model</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Tokens</th>
+                  <th className="px-4 py-3">Est. cost</th>
+                  <th className="px-4 py-3">Created</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {costs.recent.map((r) => (
+                  <tr key={r.runId} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <Link
+                        to="/admin/ai/$runId"
+                        params={{ runId: r.runId }}
+                        className="font-semibold text-blue hover:underline"
+                      >
+                        {r.companyName ?? "Unknown company"}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted">{r.model}</td>
+                    <td className="px-4 py-3">
+                      <Badge tone={statusTone(r.status)}>{AI_RUN_STATUS_LABELS[r.status] ?? r.status}</Badge>
+                    </td>
+                    <td className="px-4 py-3 text-muted">{formatTokens(r.tokens)}</td>
+                    <td className="px-4 py-3 font-medium text-ink">{formatUsd(r.costUsd)}</td>
+                    <td className="px-4 py-3 text-muted">{formatDate(r.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function DeleteAiDataCard({
+  companies,
+  canMutate,
+}: {
+  companies: AiOptOutRow[];
+  canMutate: boolean;
+}) {
+  const [companyId, setCompanyId] = useState("");
+  const [typed, setTyped] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const selected = companies.find((c) => c.companyId === companyId);
+  const name = selected?.companyName ?? "";
+  const confirmed =
+    selected !== undefined && typed.trim().toLowerCase() === name.trim().toLowerCase() && name.trim() !== "";
+  const ready = canMutate && confirmed && reason.trim() !== "" && !busy;
+
+  const submit = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const r = await deleteCompanyAiData({ data: { companyId, confirmName: typed, reason } });
+      setFeedback(r.ok ? { ok: true, text: r.message } : { ok: false, text: r.error });
+      if (r.ok) {
+        setCompanyId("");
+        setTyped("");
+        setReason("");
+        setTimeout(() => window.location.reload(), 1400);
+      }
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : "Could not delete the AI data." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-bold text-ink">Delete company AI data</h2>
+        <p className="mt-1 text-sm text-muted">
+          Permanently remove everything the AI engine holds for one company: agent runs, their audit
+          events, recommendations, upsell opportunities, data-source permissions, AI preferences and
+          AI-created evidence. Company profile, catalogue and contract data are never touched. The
+          action is immutable and dual-audited.
+        </p>
+      </div>
+      <div className="grid gap-4 px-5 py-4">
+        <div>
+          <label className="text-sm font-semibold text-ink" htmlFor="del-company">
+            Company
+          </label>
+          <select
+            id="del-company"
+            value={companyId}
+            disabled={!canMutate || busy}
+            onChange={(e) => {
+              setCompanyId(e.target.value);
+              setTyped("");
+            }}
+            className="mt-1 w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue focus:outline-none disabled:bg-slate-50 disabled:text-muted"
+          >
+            <option value="">Select a company…</option>
+            {companies.map((c) => (
+              <option key={c.companyId} value={c.companyId}>
+                {c.companyName ?? "Unknown company"}
+                {c.optOut ? " (opted out)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-sm font-semibold text-ink" htmlFor="del-confirm">
+            Type the company name to confirm
+          </label>
+          <p className="text-xs text-muted">
+            {selected
+              ? `Type exactly: ${name}`
+              : "Select a company above first."}
+          </p>
+          <input
+            id="del-confirm"
+            type="text"
+            disabled={!canMutate || busy || !selected}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={selected ? name : ""}
+            className="mt-1 w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue focus:outline-none disabled:bg-slate-50 disabled:text-muted"
+          />
+        </div>
+        <div>
+          <label className="text-sm font-semibold text-ink" htmlFor="del-reason">
+            Admin reason (required, audited)
+          </label>
+          <textarea
+            id="del-reason"
+            rows={2}
+            disabled={!canMutate || busy}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Company requested removal of its AI data under the deletion policy."
+            className="mt-1 w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue focus:outline-none disabled:bg-slate-50 disabled:text-muted"
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!ready}
+            onClick={submit}
+            className="border-danger/50 text-danger hover:border-danger hover:text-danger"
+          >
+            {busy ? "Deleting…" : "Delete AI data"}
+          </Button>
+          {!confirmed && companyId && (
+            <span className="text-xs text-muted">Typed confirmation does not match the company name.</span>
+          )}
+        </div>
+        <div>
+          <ErrorText>{feedback && !feedback.ok ? feedback.text : null}</ErrorText>
+          {feedback?.ok ? (
+            <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm font-medium text-success">
+              {feedback.text}
+            </p>
+          ) : null}
+        </div>
+      </div>
     </Card>
   );
 }
@@ -607,16 +894,18 @@ function AiControlsPage() {
             </ErrorText>
           </Card>
         )}
+        <CostsCard costs={loader.costsResult} />
         <DataSourcesCard sources={data.dataSources} canMutate={canMutate} />
         <OptOutsCard rows={data.optOuts} />
         <RunHistoryCard runs={data.runs} canMutate={canMutate} />
         <AuditTrailCard events={data.auditEvents} />
+        <DeleteAiDataCard companies={data.optOuts} canMutate={canMutate} />
       </div>
 
       {!canMutate && (
         <p className="mt-4 text-xs text-muted">
-          Read-only view. Data-source toggles, retries, engine-limit edits and manual re-runs require
-          an operations, compliance or super_admin staff role.
+          Read-only view. Data-source toggles, retries, engine-limit edits, manual re-runs and the
+          company AI-data deletion flow require an operations, compliance or super_admin staff role.
         </p>
       )}
     </div>

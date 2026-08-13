@@ -831,8 +831,10 @@ export const updateAdminUpsellNotes = createServerFn({ method: "POST" })
 // pattern: every mutation runs in an asUser(admin, 'sb_admin') batch and
 // writes immutable audit rows in the same transaction).
 import {
+  doDeleteCompanyAiData,
   doGetAiControlSettings,
   doGetAiControlsOverview,
+  doGetAiCostOverview,
   doGetAiRunDetail,
   doReRunAiAnalysis,
   doRetryAiRun,
@@ -852,8 +854,12 @@ export type {
   AiControlSettingsResult,
   AiControlSettingsRow,
   AiControlsOverview,
+  AiCostByModelRow,
+  AiCostOverviewResult,
   AiDataSourceRow,
+  AiDeleteAiDataResult,
   AiOptOutRow,
+  AiRecentCostRow,
   AiRetryResult,
   AiRunDetailResult,
   AiRunListRow,
@@ -924,4 +930,20 @@ export const updateAdminAiControlSettings = createServerFn({ method: "POST" })
     const actor = await resolveAdminActor(session);
     if (!actor) return { ok: false as const, error: "Admin session required." };
     return doUpdateAiControlSettings(actor, data);
+  });
+export const getAdminAiCostOverview = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await getAdminSession();
+  const actor = await resolveAdminActor(session);
+  if (!actor) return { ok: false as const, error: "Admin session required." };
+  return doGetAiCostOverview(actor);
+});
+export const deleteCompanyAiData = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) => d as { companyId: string; confirmName: string; reason: string },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doDeleteCompanyAiData(actor, data.companyId, data.confirmName, data.reason);
   });

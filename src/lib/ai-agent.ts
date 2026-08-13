@@ -81,6 +81,51 @@ export const AI_CONTROL_SETTING_DEFAULTS: AiControlSettings = {
   autoRunEnabled: true,
 };
 
+// ------------------------------------------------------------------ cost model
+// Per-run cost tracking (AI Controls Phase 2b). The engine is a deterministic
+// heuristic — it makes no external model calls — so these are MODELED rates
+// (USD per 1M tokens) that mirror a light-weight extraction model. They let the
+// platform surface an honest estimated cost per run and per model; unknown
+// prompt models fall back to the v1 rates. Rates are not user-editable in this
+// phase (cost monitoring is read-only by design).
+export const AI_MODEL_COST_PER_1M: Record<string, { input: number; output: number }> = {
+  "deterministic-heuristic-v1": { input: 0.15, output: 0.6 },
+  "deterministic-heuristic-v2": { input: 0.3, output: 1.2 },
+};
+export const AI_DEFAULT_MODEL_COST = AI_MODEL_COST_PER_1M["deterministic-heuristic-v1"];
+
+/** Estimate tokens + USD cost for a completed run from the evidence and
+ *  recommendations it produced. Deterministic: ~4 characters per token (the
+ *  standard rule of thumb), a fixed prompt overhead for the system prompt +
+ *  company record, and per-recommendation output formatting overhead. Returns
+ *  rounded tokens and a cost rounded to 6 decimals (sub-cent values are
+ *  realistic for a heuristic run). */
+export function estimateRunCost(
+  evidenceTexts: string[],
+  recommendations: { summary: string; rationale?: string | null }[],
+  promptModel: string | null,
+  opts: { basePromptTokens?: number } = {},
+): { inputTokens: number; outputTokens: number; tokens: number; estimatedCostUsd: number } {
+  const model = promptModel ?? PROMPT_MODEL;
+  const rates = AI_MODEL_COST_PER_1M[model] ?? AI_DEFAULT_MODEL_COST;
+  const base = opts.basePromptTokens ?? 600;
+  const inputChars = evidenceTexts.reduce((n, t) => n + (t?.length ?? 0), 0);
+  const outputChars = recommendations.reduce(
+    (n, r) => n + (r.summary?.length ?? 0) + (r.rationale?.length ?? 0) + 40,
+    0,
+  );
+  const inputTokens = Math.round(base + inputChars / 4);
+  const outputTokens = Math.round(outputChars / 4);
+  const estimatedCostUsd =
+    (inputTokens / 1e6) * rates.input + (outputTokens / 1e6) * rates.output;
+  return {
+    inputTokens,
+    outputTokens,
+    tokens: inputTokens + outputTokens,
+    estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
+  };
+}
+
 /** Read the platform engine-control settings through asUser (the table is
  *  FORCE RLS, sb_admin-only). Falls back to defaults when absent. */
 async function loadAiControlSettings(actorId: string): Promise<AiControlSettings> {
@@ -278,6 +323,14 @@ export type AiRunMetadata = {
   skipped?: string;
   seeded?: boolean;
   note?: string;
+  // Per-run cost tracking (AI Controls Phase 2b): recorded on completed runs by
+  // estimateRunCost() — a deterministic model of tokens/cost for this heuristic
+  // engine. Absent on queued / rate-limited / failed-before-completion runs.
+  tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  estimatedCostUsd?: number;
+  costEstimateNote?: string;
 };
 
 /** Concrete JSON shape of upsell_opportunities.relevant_opportunities items. */
@@ -757,6 +810,11 @@ async function processRun(actorId: string, runId: string, dryRun: boolean): Prom
     }
 
     // 8. complete run + audit --------------------------------------------------
+    const cost = estimateRunCost(
+      evidence.map((e) => e.text),
+      recommendations.map((r) => ({ summary: r.summary, rationale: r.rationale })),
+      run.prompt_model,
+    );
     const metadata = {
       trigger: run.trigger,
       company: comp.name,
@@ -779,6 +837,12 @@ async function processRun(actorId: string, runId: string, dryRun: boolean): Prom
         service: svcMeta.get(r.serviceId)?.name ?? r.serviceId,
         confidence: r.confidence,
       })),
+      // Cost tracking (Phase 2b): deterministic estimate — see estimateRunCost().
+      tokens: cost.tokens,
+      inputTokens: cost.inputTokens,
+      outputTokens: cost.outputTokens,
+      estimatedCostUsd: cost.estimatedCostUsd,
+      costEstimateNote: `Deterministic estimate (~4 chars/token) at modeled rates for ${run.prompt_model ?? PROMPT_MODEL}; the engine makes no external model calls.`,
     };
     await completeRun(actorId, runId, metadata, dryRun);
     return { ...base, evidenceCount: evidence.length, recommendationsCreated: created };

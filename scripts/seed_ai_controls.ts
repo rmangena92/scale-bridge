@@ -183,6 +183,138 @@ if (!qRun[0]) {
   console.log(`  ai-controls: run + (queued, ${comp.name})`);
 }
 
+// Phase 2b: per-run cost tracking. Backfill the seeded completed run's
+// run_metadata with token counts + estimated cost (idempotent: only when the
+// run_metadata has no estimatedCostUsd yet), then seed a few historical
+// completed runs with varied tokens/cost/models so the Costs dashboard renders
+// data. All rows carry the same engine audit pattern as the completed run.
+const completedCost = {
+  tokens: 10600,
+  inputTokens: 8200,
+  outputTokens: 2400,
+  estimatedCostUsd: 0.00267,
+  costEstimateNote:
+    "Seeded estimate: deterministic-heuristic-v1 modeled rates (input $0.15/M, output $0.60/M), ~4 chars/token.",
+};
+const [, curMeta] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
+  tx`select run_metadata from ai_agent_runs where id = ${RUN_IDS.completed} limit 1`,
+])) as unknown as [unknown, { run_metadata: Record<string, unknown> | null }[]];
+const [, backfilled] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
+  tx`update ai_agent_runs
+     set run_metadata = ${{ ...(curMeta[0]?.run_metadata ?? {}), ...completedCost } as never}
+     where id = ${RUN_IDS.completed} and run_metadata->>'estimatedCostUsd' is null
+     returning id`,
+])) as unknown as [unknown, { id: string }[]];
+if (backfilled[0]) {
+  created++;
+  console.log("  ai-controls: run + (cost backfill on completed run)");
+}
+
+const HISTORY_RUNS = [
+  {
+    id: "44444444-4444-4444-8444-444444444444",
+    companyIdx: 1,
+    trigger: "contract_participation",
+    daysAgo: 4,
+    hours: 3,
+    promptModel: "deterministic-heuristic-v1",
+    metadata: {
+      trigger: "contract_participation",
+      verificationStatus: "Verified",
+      dryRun: false,
+      publicSourcesChecked: true,
+      grantedPermissions: ["internal_data", "website", "public_source"],
+      evidenceCount: 9,
+      internalEvidenceCount: 6,
+      publicEvidenceCount: 3,
+      intakeResponsesPresent: true,
+      recommendationsCreated: 4,
+      tokens: 18400,
+      inputTokens: 14800,
+      outputTokens: 3600,
+      estimatedCostUsd: 0.00438,
+      costEstimateNote:
+        "Seeded estimate: deterministic-heuristic-v1 modeled rates (input $0.15/M, output $0.60/M), ~4 chars/token.",
+      seeded: true,
+    },
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555555",
+    companyIdx: 3,
+    trigger: "intake",
+    daysAgo: 6,
+    hours: 5,
+    promptModel: "deterministic-heuristic-v2",
+    metadata: {
+      trigger: "intake",
+      verificationStatus: "Pending",
+      dryRun: false,
+      publicSourcesChecked: false,
+      grantedPermissions: ["internal_data"],
+      evidenceCount: 5,
+      internalEvidenceCount: 5,
+      publicEvidenceCount: 0,
+      intakeResponsesPresent: true,
+      recommendationsCreated: 2,
+      tokens: 9800,
+      inputTokens: 7600,
+      outputTokens: 2200,
+      estimatedCostUsd: 0.0036,
+      costEstimateNote:
+        "Seeded estimate: deterministic-heuristic-v2 modeled rates (input $0.30/M, output $1.20/M), ~4 chars/token.",
+      seeded: true,
+    },
+  },
+  {
+    id: "66666666-6666-4666-8666-666666666666",
+    companyIdx: 1,
+    trigger: "manual",
+    daysAgo: 3,
+    hours: 1,
+    promptModel: "deterministic-heuristic-v1",
+    metadata: {
+      trigger: "manual",
+      verificationStatus: "Verified",
+      dryRun: false,
+      publicSourcesChecked: true,
+      grantedPermissions: ["internal_data", "website", "public_source"],
+      evidenceCount: 4,
+      internalEvidenceCount: 3,
+      publicEvidenceCount: 1,
+      intakeResponsesPresent: true,
+      recommendationsCreated: 1,
+      tokens: 5400,
+      inputTokens: 4200,
+      outputTokens: 1200,
+      estimatedCostUsd: 0.00135,
+      costEstimateNote:
+        "Seeded estimate: deterministic-heuristic-v1 modeled rates (input $0.15/M, output $0.60/M), ~4 chars/token.",
+      seeded: true,
+    },
+  },
+];
+for (const h of HISTORY_RUNS) {
+  const [, hRun] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
+    tx`select id from ai_agent_runs where id = ${h.id}`,
+  ])) as unknown as [unknown, { id: string }[]];
+  if (hRun[0]) continue;
+  const comp = companies[h.companyIdx];
+  const started = new Date(Date.now() - h.daysAgo * 86400000 - h.hours * 3600000);
+  const finished = new Date(started.getTime() - 2 * 60000);
+  await asUser(ADMIN_ID, "sb_admin", (tx) => [
+    tx`insert into ai_agent_runs (id, company_id, trigger, status, agent_version, prompt_model, started_at, finished_at, run_metadata)
+       values (${h.id}, ${comp.id}, ${h.trigger}, 'completed', '0.1.0', ${h.promptModel},
+               ${started}, ${finished},
+               ${{ ...h.metadata, company: comp.name } as never})`,
+    tx`insert into ai_audit_events (id, run_id, actor_type, actor_id, action, entity_type, entity_id, details)
+       values (${randomUUID()}, ${h.id}, 'agent', 'agent:0.1.0', 'ai.run.queued', 'ai_agent_run', ${h.id}, ${{ companyId: comp.id, trigger: h.trigger } as never}),
+              (${randomUUID()}, ${h.id}, 'agent', 'agent:0.1.0', 'ai.run.started', 'ai_agent_run', ${h.id}, ${{ trigger: h.trigger } as never}),
+              (${randomUUID()}, ${h.id}, 'agent', 'agent:0.1.0', 'ai.run.completed', 'ai_agent_run', ${h.id}, ${{ evidenceCount: h.metadata.evidenceCount, recommendationsCreated: h.metadata.recommendationsCreated } as never})`,
+  ]);
+  created++;
+  console.log(`  ai-controls: run + (historical completed, ${comp.name}, ${h.promptModel}, ${h.metadata.tokens} tokens)`);
+}
+
 // a seeded data-source toggle audit event (shows the trail pattern)
 const [, togRows] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
   tx`select id from ai_audit_events where action = 'ai.control.data_source_toggle' limit 1`,

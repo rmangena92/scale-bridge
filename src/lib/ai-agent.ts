@@ -398,18 +398,20 @@ async function processRun(actorId: string, runId: string, dryRun: boolean): Prom
 
   try {
     // 2. company + preferences --------------------------------------------
-    const [, company, prefs, perms] = (await asUser(actorId, "sb_admin", (tx) => [
+    const [, company, prefs, perms, enabledSources] = (await asUser(actorId, "sb_admin", (tx) => [
       tx`select id, name, type, description, internal_notes, verification_status
          from companies where id = ${run.company_id}`,
       tx`select ai_discovery_enabled, public_source_consent, opt_out
          from company_ai_preferences where company_id = ${run.company_id}`,
       tx`select source, granted, consent_ref from ai_data_source_permissions
          where company_id = ${run.company_id}`,
+      tx`select source from ai_data_source_registry where enabled = true`,
     ])) as unknown as [
       unknown,
       { id: string; name: string; type: string | null; description: string | null; internal_notes: string[] | null; verification_status: string }[],
       { ai_discovery_enabled: boolean; public_source_consent: boolean; opt_out: boolean }[],
       { source: string; granted: boolean; consent_ref: string | null }[],
+      { source: string }[],
     ];
     const comp = company[0];
     if (!comp) {
@@ -417,7 +419,10 @@ async function processRun(actorId: string, runId: string, dryRun: boolean): Prom
       return { ...base, ok: false, error: "Company not found." };
     }
     const pref = prefs[0] ?? { ai_discovery_enabled: true, public_source_consent: false, opt_out: false };
-    const grantedPerms = perms.filter((p) => p.granted).map((p) => p.source);
+    const enabledSet = new Set(enabledSources.map((e) => e.source));
+    // Platform-level switch (Master Admin AI Controls): a source the admin has
+    // disabled is treated as not granted, even when the company consented.
+    const grantedPerms = perms.filter((p) => p.granted && enabledSet.has(p.source)).map((p) => p.source);
 
     if (pref.opt_out) {
       await completeRun(actorId, runId, { skipped: "opt_out", company: comp.name }, dryRun);
@@ -488,6 +493,7 @@ async function processRun(actorId: string, runId: string, dryRun: boolean): Prom
     for (const e of evRows) {
       const isPublic = PUBLIC_EVIDENCE_TYPES.has(e.evidence_type ?? "");
       if (isPublic && !pref.public_source_consent) continue; // consent gate
+      if (isPublic && !enabledSet.has("website") && !enabledSet.has("public_source")) continue; // platform switch
       const rel = relsById.get(e.company_service_id);
       if (!rel) continue;
       const text = [e.title, e.excerpt].filter(Boolean).join(". ");

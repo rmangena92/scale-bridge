@@ -59,6 +59,7 @@ import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
 import { Route as AdminClientPortalsRouteImport } from './routes/admin/client-portals'
 import { Route as AdminAuditLogRouteImport } from './routes/admin/audit-log'
 import { Route as AdminAiInsightsRouteImport } from './routes/admin/ai-insights'
+import { Route as AdminAiRouteImport } from './routes/admin/ai'
 import { Route as ClientContractsIndexRouteImport } from './routes/client/contracts/index'
 import { Route as AdminVerificationIndexRouteImport } from './routes/admin/verification/index'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin/users/index'
@@ -68,6 +69,7 @@ import { Route as AdminSettingsIndexRouteImport } from './routes/admin/settings/
 import { Route as AdminServicesIndexRouteImport } from './routes/admin/services/index'
 import { Route as AdminContractsIndexRouteImport } from './routes/admin/contracts/index'
 import { Route as AdminCompaniesIndexRouteImport } from './routes/admin/companies/index'
+import { Route as AdminAiIndexRouteImport } from './routes/admin/ai/index'
 import { Route as ClientContractsWorkspaceIdRouteImport } from './routes/client/contracts/$workspaceId'
 import { Route as AdminVerificationCompanyIdRouteImport } from './routes/admin/verification/$companyId'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin/users/$userId'
@@ -78,6 +80,7 @@ import { Route as AdminServicesCategoriesRouteImport } from './routes/admin/serv
 import { Route as AdminServicesServiceIdRouteImport } from './routes/admin/services/$serviceId'
 import { Route as AdminContractsWorkspaceIdRouteImport } from './routes/admin/contracts/$workspaceId'
 import { Route as AdminCompaniesCompanyIdRouteImport } from './routes/admin/companies/$companyId'
+import { Route as AdminAiRunIdRouteImport } from './routes/admin/ai/$runId'
 import { Route as AdminCompaniesCompanyIdIndexRouteImport } from './routes/admin/companies/$companyId/index'
 import { Route as AdminCompaniesCompanyIdViewAsClientRouteImport } from './routes/admin/companies/$companyId/view-as-client'
 
@@ -331,6 +334,11 @@ const AdminAiInsightsRoute = AdminAiInsightsRouteImport.update({
   path: '/ai-insights',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAiRoute = AdminAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => AdminRoute,
+} as any)
 const ClientContractsIndexRoute = ClientContractsIndexRouteImport.update({
   id: '/contracts/',
   path: '/contracts/',
@@ -375,6 +383,11 @@ const AdminCompaniesIndexRoute = AdminCompaniesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AdminCompaniesRoute,
+} as any)
+const AdminAiIndexRoute = AdminAiIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminAiRoute,
 } as any)
 const ClientContractsWorkspaceIdRoute =
   ClientContractsWorkspaceIdRouteImport.update({
@@ -430,6 +443,11 @@ const AdminCompaniesCompanyIdRoute = AdminCompaniesCompanyIdRouteImport.update({
   path: '/$companyId',
   getParentRoute: () => AdminCompaniesRoute,
 } as any)
+const AdminAiRunIdRoute = AdminAiRunIdRouteImport.update({
+  id: '/$runId',
+  path: '/$runId',
+  getParentRoute: () => AdminAiRoute,
+} as any)
 const AdminCompaniesCompanyIdIndexRoute =
   AdminCompaniesCompanyIdIndexRouteImport.update({
     id: '/',
@@ -457,6 +475,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/ai': typeof AdminAiRouteWithChildren
   '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/client-portals': typeof AdminClientPortalsRoute
@@ -494,6 +513,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/ai/$runId': typeof AdminAiRunIdRoute
   '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
@@ -504,6 +524,7 @@ export interface FileRoutesByFullPath {
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
+  '/admin/ai/': typeof AdminAiIndexRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
   '/admin/services/': typeof AdminServicesIndexRoute
@@ -556,6 +577,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/client': typeof ClientIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
+  '/admin/ai/$runId': typeof AdminAiRunIdRoute
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
   '/admin/services/categories': typeof AdminServicesCategoriesRoute
@@ -565,6 +587,7 @@ export interface FileRoutesByTo {
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
+  '/admin/ai': typeof AdminAiIndexRoute
   '/admin/companies': typeof AdminCompaniesIndexRoute
   '/admin/contracts': typeof AdminContractsIndexRoute
   '/admin/services': typeof AdminServicesIndexRoute
@@ -592,6 +615,7 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/signup': typeof SignupRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/admin/ai': typeof AdminAiRouteWithChildren
   '/admin/ai-insights': typeof AdminAiInsightsRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/client-portals': typeof AdminClientPortalsRoute
@@ -629,6 +653,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/client/': typeof ClientIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/ai/$runId': typeof AdminAiRunIdRoute
   '/admin/companies/$companyId': typeof AdminCompaniesCompanyIdRouteWithChildren
   '/admin/contracts/$workspaceId': typeof AdminContractsWorkspaceIdRoute
   '/admin/services/$serviceId': typeof AdminServicesServiceIdRoute
@@ -639,6 +664,7 @@ export interface FileRoutesById {
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/admin/verification/$companyId': typeof AdminVerificationCompanyIdRoute
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
+  '/admin/ai/': typeof AdminAiIndexRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
   '/admin/services/': typeof AdminServicesIndexRoute
@@ -667,6 +693,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/signup'
     | '/workspaces'
+    | '/admin/ai'
     | '/admin/ai-insights'
     | '/admin/audit-log'
     | '/admin/client-portals'
@@ -704,6 +731,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/client/'
     | '/workspaces/'
+    | '/admin/ai/$runId'
     | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
     | '/admin/services/$serviceId'
@@ -714,6 +742,7 @@ export interface FileRouteTypes {
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
+    | '/admin/ai/'
     | '/admin/companies/'
     | '/admin/contracts/'
     | '/admin/services/'
@@ -766,6 +795,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/client'
     | '/workspaces'
+    | '/admin/ai/$runId'
     | '/admin/contracts/$workspaceId'
     | '/admin/services/$serviceId'
     | '/admin/services/categories'
@@ -775,6 +805,7 @@ export interface FileRouteTypes {
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
+    | '/admin/ai'
     | '/admin/companies'
     | '/admin/contracts'
     | '/admin/services'
@@ -801,6 +832,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/signup'
     | '/workspaces'
+    | '/admin/ai'
     | '/admin/ai-insights'
     | '/admin/audit-log'
     | '/admin/client-portals'
@@ -838,6 +870,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/client/'
     | '/workspaces/'
+    | '/admin/ai/$runId'
     | '/admin/companies/$companyId'
     | '/admin/contracts/$workspaceId'
     | '/admin/services/$serviceId'
@@ -848,6 +881,7 @@ export interface FileRouteTypes {
     | '/admin/users/$userId'
     | '/admin/verification/$companyId'
     | '/client/contracts/$workspaceId'
+    | '/admin/ai/'
     | '/admin/companies/'
     | '/admin/contracts/'
     | '/admin/services/'
@@ -1229,6 +1263,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAiInsightsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/ai': {
+      id: '/admin/ai'
+      path: '/ai'
+      fullPath: '/admin/ai'
+      preLoaderRoute: typeof AdminAiRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/client/contracts/': {
       id: '/client/contracts/'
       path: '/contracts'
@@ -1291,6 +1332,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/companies/'
       preLoaderRoute: typeof AdminCompaniesIndexRouteImport
       parentRoute: typeof AdminCompaniesRoute
+    }
+    '/admin/ai/': {
+      id: '/admin/ai/'
+      path: '/'
+      fullPath: '/admin/ai/'
+      preLoaderRoute: typeof AdminAiIndexRouteImport
+      parentRoute: typeof AdminAiRoute
     }
     '/client/contracts/$workspaceId': {
       id: '/client/contracts/$workspaceId'
@@ -1362,6 +1410,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminCompaniesCompanyIdRouteImport
       parentRoute: typeof AdminCompaniesRoute
     }
+    '/admin/ai/$runId': {
+      id: '/admin/ai/$runId'
+      path: '/$runId'
+      fullPath: '/admin/ai/$runId'
+      preLoaderRoute: typeof AdminAiRunIdRouteImport
+      parentRoute: typeof AdminAiRoute
+    }
     '/admin/companies/$companyId/': {
       id: '/admin/companies/$companyId/'
       path: '/'
@@ -1378,6 +1433,19 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AdminAiRouteChildren {
+  AdminAiRunIdRoute: typeof AdminAiRunIdRoute
+  AdminAiIndexRoute: typeof AdminAiIndexRoute
+}
+
+const AdminAiRouteChildren: AdminAiRouteChildren = {
+  AdminAiRunIdRoute: AdminAiRunIdRoute,
+  AdminAiIndexRoute: AdminAiIndexRoute,
+}
+
+const AdminAiRouteWithChildren =
+  AdminAiRoute._addFileChildren(AdminAiRouteChildren)
 
 interface AdminCompaniesCompanyIdRouteChildren {
   AdminCompaniesCompanyIdViewAsClientRoute: typeof AdminCompaniesCompanyIdViewAsClientRoute
@@ -1510,6 +1578,7 @@ const AdminVerificationRouteWithChildren =
   AdminVerificationRoute._addFileChildren(AdminVerificationRouteChildren)
 
 interface AdminRouteChildren {
+  AdminAiRoute: typeof AdminAiRouteWithChildren
   AdminAiInsightsRoute: typeof AdminAiInsightsRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminClientPortalsRoute: typeof AdminClientPortalsRoute
@@ -1533,6 +1602,7 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAiRoute: AdminAiRouteWithChildren,
   AdminAiInsightsRoute: AdminAiInsightsRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminClientPortalsRoute: AdminClientPortalsRoute,

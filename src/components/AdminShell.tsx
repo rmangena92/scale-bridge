@@ -26,6 +26,7 @@ export const ADMIN_NAV: { to: string; label: string }[] = [
   { to: "/admin/verification", label: "Verification" },
   { to: "/admin/ai-insights", label: "AI Insights" },
   { to: "/admin/upsells", label: "Upsell Opportunities" },
+  { to: "/admin/ai", label: "AI Controls" },
   { to: "/admin/users", label: "Users" },
   { to: "/admin/support", label: "Support" },
   { to: "/admin/disputes", label: "Disputes" },

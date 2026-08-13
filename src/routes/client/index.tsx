@@ -232,7 +232,7 @@ function ActionCards({ stats }: { stats: ClientDashboardStats }) {
         ))}
       </ul>
       <p className="mt-3 text-xs text-muted">
-        Approval actions arrive with Parts B/C — counts are read-only for now.
+        Open a queue to review and decide each item — approvals are live.
       </p>
     </Card>
   );

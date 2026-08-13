@@ -760,11 +760,31 @@ export const SCHEMA_SQL: string[] = [
     details jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default now()
   )`,
+  // Platform-level AI data-source registry (Master Admin AI Controls). One row
+  // per source kind the agent may use; admins toggle enabled on/off (audited).
+  // The engine respects enabled = true when granting permissions and reading
+  // public evidence. Company-level consent lives in ai_data_source_permissions
+  // and company_ai_preferences - this table is the platform-wide switch.
+  `create table if not exists ai_data_source_registry (
+    id uuid primary key default gen_random_uuid(),
+    source text not null unique
+      check (source in ('internal_data','website','public_source')),
+    name text not null,
+    description text,
+    source_url text,
+    enabled boolean not null default true,
+    consent_required boolean not null default false,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`,
 
   // ------------------------------------------------------------------
   // Indexes
   // ------------------------------------------------------------------
   `create index if not exists sessions_token_hash_idx on sessions (token_hash)`,
+  `create index if not exists ai_agent_runs_created_at_idx on ai_agent_runs (created_at desc)`,
+  `create index if not exists ai_audit_events_created_at_idx on ai_audit_events (created_at desc)`,
+  `create index if not exists ai_audit_events_entity_idx on ai_audit_events (entity_type, entity_id)`,
   `create index if not exists sessions_user_id_idx on sessions (user_id)`,
   `create index if not exists profiles_company_id_idx on profiles (company_id)`,
   `create index if not exists contract_workspaces_lead_idx on contract_workspaces (lead_contractor_id)`,
@@ -1654,6 +1674,14 @@ export const SCHEMA_SQL: string[] = [
   `create policy ai_audit_events_update on ai_audit_events for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
   `drop policy if exists ai_audit_events_delete on ai_audit_events`,
   `create policy ai_audit_events_delete on ai_audit_events for delete using (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_registry_select on ai_data_source_registry`,
+  `create policy ai_data_source_registry_select on ai_data_source_registry for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_registry_insert on ai_data_source_registry`,
+  `create policy ai_data_source_registry_insert on ai_data_source_registry for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_registry_update on ai_data_source_registry`,
+  `create policy ai_data_source_registry_update on ai_data_source_registry for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_data_source_registry_delete on ai_data_source_registry`,
+  `create policy ai_data_source_registry_delete on ai_data_source_registry for delete using (${IS_ADMIN})`,
   // ------------------------------------------------------------------
   // Portal-phase policies (Admin + Client portals).
   //
@@ -3051,4 +3079,17 @@ export const SCHEMA_SQL: string[] = [
     ('pricing.intro', '{"heading":"Simple, transparent pricing","body":"Entry-level access is free, verification is affordable, and anchor partners pay for coordinated delivery. Annual billing includes two months free."}'),
     ('footer.tagline', '"ScaleBridge — The infrastructure for lasting business partnerships."')
    on conflict (key) do nothing`,
+  // Master Admin AI Controls: platform-level data-source registry rows
+  // (idempotent; admins toggle enabled in place, audit trails record changes).
+  `insert into ai_data_source_registry (source, name, description, source_url, enabled, consent_required) values
+    ('internal_data', 'Internal company data',
+     'Approved internal data: company profiles, company_services relationships, service_evidence, work packages, uploaded documents and client-intake responses.',
+     null, true, false),
+    ('website', 'Company website',
+     'Public evidence captured from a company website (service pages, capability statements, case studies). Used only when the company has granted public-source consent.',
+     null, true, true),
+    ('public_source', 'Public sources',
+     'Public directories, registries and third-party sources with a captured source_url. Used only when the company has granted public-source consent.',
+     null, true, true)
+   on conflict (source) do nothing`,
 ];

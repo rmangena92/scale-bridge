@@ -4,6 +4,7 @@ import {
   AI_CONTROL_MUTATE_ROLES,
   AI_RUN_STATUS_LABELS,
   getAdminAiControls,
+  getAdminSession,
   setAiDataSourceEnabled,
 } from "~/lib/admin";
 import type { AiAuditRow, AiDataSourceRow, AiOptOutRow, AiRunListRow } from "~/lib/admin";
@@ -46,27 +47,6 @@ function statusTone(s: string): "green" | "red" | "amber" | "slate" | "blue" | "
 
 function toggleTone(v: boolean): "green" | "red" | "amber" | "slate" | "blue" | "teal" | "navy" {
   return v ? "green" : "red";
-}
-
-/** Render a run's metadata (outputs) as compact JSON. */
-function RunMetadata({ meta }: { meta: Record<string, unknown> }) {
-  const entries = Object.entries(meta ?? {}).filter(([, v]) => v !== null && v !== undefined);
-  if (entries.length === 0) return <span className="text-muted">No run metadata recorded.</span>;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {entries.map(([k, v]) => (
-        <span
-          key={k}
-          className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs text-ink"
-        >
-          <span className="font-semibold text-muted">{k}:</span>
-          <span className="font-medium">
-            {Array.isArray(v) ? v.join(", ") : typeof v === "object" && v ? JSON.stringify(v) : String(v)}
-          </span>
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function DataSourcesCard({
@@ -165,7 +145,7 @@ function DataSourcesCard({
                 </td>
                 <td className="px-4 py-3">
                   <Button
-                    variant={s.enabled ? "danger" : "primary"}
+                    variant={s.enabled ? "outline" : "primary"}
                     size="sm"
                     disabled={!canMutate || busyId === s.id}
                     onClick={() => toggle(s, !s.enabled)}
@@ -373,7 +353,7 @@ function AiControlsPage() {
 
   const canMutate =
     !!loader.admin?.canMutate &&
-    (loader.admin.staffRoles ?? []).some((r) =>
+    (loader.admin.staffRoles ?? []).some((r: string) =>
       (AI_CONTROL_MUTATE_ROLES as readonly string[]).includes(r as never),
     );
 

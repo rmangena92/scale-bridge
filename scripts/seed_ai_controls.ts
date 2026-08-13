@@ -97,8 +97,6 @@ for (const c of companies) {
 console.log(`  ai-controls: data-source permissions + (${companies.length * permSources.length} rows)`);
 
 // ai_agent_runs (completed / failed / queued) + engine audit events
-const companyById = new Map(companies.map((c) => [c.id, c.name]));
-
 // completed run
 const [, cRun] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
   tx`select id from ai_agent_runs where id = ${RUN_IDS.completed}`,

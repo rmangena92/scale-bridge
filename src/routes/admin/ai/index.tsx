@@ -2,22 +2,36 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   AI_CONTROL_MUTATE_ROLES,
+  AI_CONTROL_SETTING_FIELDS,
   AI_RUN_STATUS_LABELS,
+  getAdminAiControlSettings,
   getAdminAiControls,
   getAdminSession,
+  retryAiRun,
   setAiDataSourceEnabled,
+  updateAdminAiControlSettings,
 } from "~/lib/admin";
-import type { AiAuditRow, AiDataSourceRow, AiOptOutRow, AiRunListRow } from "~/lib/admin";
+import type {
+  AiAuditRow,
+  AiControlSettingsRow,
+  AiDataSourceRow,
+  AiOptOutRow,
+  AiRunListRow,
+} from "~/lib/admin";
 import { Badge, Button, Card, DbSetupPage, EmptyState, ErrorText } from "~/components/ui";
 
 export const Route = createFileRoute("/admin/ai/")({
   loader: async () => {
     const session = await getAdminSession();
-    const result = await getAdminAiControls();
+    const [result, settingsResult] = await Promise.all([
+      getAdminAiControls(),
+      getAdminAiControlSettings(),
+    ]);
     return {
       setupRequired: session.setupRequired,
       admin: session.admin,
       result: result as Awaited<ReturnType<typeof getAdminAiControls>>,
+      settingsResult: settingsResult as Awaited<ReturnType<typeof getAdminAiControlSettings>>,
     };
   },
   component: AiControlsPage,
@@ -166,6 +180,124 @@ function DataSourcesCard({
   );
 }
 
+function EngineLimitsCard({
+  settings,
+  canMutate,
+}: {
+  settings: AiControlSettingsRow;
+  canMutate: boolean;
+}) {
+  const [draft, setDraft] = useState<AiControlSettingsRow>(settings);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const changed =
+    draft.dailyRunCap !== settings.dailyRunCap ||
+    draft.perCompanyDailyCap !== settings.perCompanyDailyCap ||
+    draft.minIntervalSeconds !== settings.minIntervalSeconds ||
+    draft.autoRunEnabled !== settings.autoRunEnabled;
+
+  const save = async () => {
+    if (!window.confirm(
+      "Save the AI engine limit changes? The new values take effect immediately for every run " +
+        "(including manual re-runs and retries) and are audited immutably.",
+    )) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const r = await updateAdminAiControlSettings({
+        data: {
+          dailyRunCap: draft.dailyRunCap,
+          perCompanyDailyCap: draft.perCompanyDailyCap,
+          minIntervalSeconds: draft.minIntervalSeconds,
+          autoRunEnabled: draft.autoRunEnabled,
+        },
+      });
+      setFeedback(r.ok ? { ok: true, text: r.message } : { ok: false, text: r.error });
+      if (r.ok) setTimeout(() => window.location.reload(), 900);
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : "Could not save the engine limits." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-bold text-ink">Engine limits</h2>
+        <p className="mt-1 text-sm text-muted">
+          Rate limits and the automation switch enforced by the AI agent before any run starts —
+          including manual re-runs and retries. Blocked runs are recorded with a clear &ldquo;rate
+          limited&rdquo; error and audited immutably.
+        </p>
+      </div>
+      <div className="grid gap-4 px-5 py-4 sm:grid-cols-2">
+        {AI_CONTROL_SETTING_FIELDS.map((f) => (
+          <div key={f.key}>
+            <label className="text-sm font-semibold text-ink" htmlFor={`limit-${f.key}`}>
+              {f.label}
+            </label>
+            <p className="text-xs text-muted">{f.description}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                id={`limit-${f.key}`}
+                type="number"
+                min={0}
+                step={1}
+                disabled={!canMutate || saving}
+                value={draft[f.key]}
+                onChange={(e) => setDraft((d) => ({ ...d, [f.key]: Number(e.target.value) }))}
+                className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm text-ink focus:border-blue focus:outline-none disabled:bg-slate-50 disabled:text-muted"
+              />
+              <span className="text-xs text-muted">{f.unit}</span>
+            </div>
+          </div>
+        ))}
+        <div>
+          <span className="text-sm font-semibold text-ink">Automatic runs</span>
+          <p className="text-xs text-muted">
+            When off, only manual runs, re-runs and retries can start; profile, intake, document and
+            contract triggers are blocked.
+          </p>
+          <label className="mt-2 inline-flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              disabled={!canMutate || saving}
+              checked={draft.autoRunEnabled}
+              onChange={(e) => setDraft((d) => ({ ...d, autoRunEnabled: e.target.checked }))}
+              className="h-4 w-4 accent-teal"
+            />
+            <span className="text-sm text-ink">{draft.autoRunEnabled ? "Enabled" : "Disabled"}</span>
+          </label>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
+        <div className="min-w-0">
+          <ErrorText>{feedback && !feedback.ok ? feedback.text : null}</ErrorText>
+          <p className="text-xs text-success">{feedback?.ok ? feedback.text : ""}</p>
+          {settings.updatedAt ? (
+            <p className="text-xs text-muted">
+              Last updated {formatDate(settings.updatedAt)}
+              {settings.updatedBy ? ` by ${settings.updatedBy.slice(0, 8)}…` : ""}
+            </p>
+          ) : (
+            <p className="text-xs text-muted">Defaults in effect — not modified yet.</p>
+          )}
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!canMutate || saving || !changed}
+          onClick={save}
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function OptOutsCard({ rows }: { rows: AiOptOutRow[] }) {
   const optedOut = rows.filter((r) => r.optOut);
   return (
@@ -227,14 +359,35 @@ function OptOutsCard({ rows }: { rows: AiOptOutRow[] }) {
   );
 }
 
-function RunHistoryCard({ runs }: { runs: AiRunListRow[] }) {
+function RunHistoryCard({ runs, canMutate }: { runs: AiRunListRow[]; canMutate: boolean }) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const retry = async (r: AiRunListRow) => {
+    if (!window.confirm(
+      `Retry the failed AI run for ${r.companyName ?? "this company"}? A new run will be queued ` +
+        "(trigger: retry), executed immediately, and audited immutably. Retries respect the engine limits.",
+    )) return;
+    setBusyId(r.id);
+    setFeedback(null);
+    try {
+      const res = await retryAiRun({ data: { runId: r.id } });
+      setFeedback(res.ok ? { ok: true, text: res.message } : { ok: false, text: res.error });
+      if (res.ok) setTimeout(() => window.location.reload(), 1200);
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : "Could not retry the run." });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <Card className="overflow-hidden p-0">
       <div className="border-b border-slate-100 px-5 py-4">
         <h2 className="text-lg font-bold text-ink">Run history</h2>
         <p className="mt-1 text-sm text-muted">
           Recent runs of the AI Service Intelligence agent. Open a run to view inputs, outputs, errors
-          and its audit events, or re-run the analysis manually.
+          and its audit events, or re-run the analysis manually. Failed runs can be retried.
         </p>
       </div>
       {runs.length === 0 ? (
@@ -256,6 +409,7 @@ function RunHistoryCard({ runs }: { runs: AiRunListRow[] }) {
                 <th className="px-4 py-3">Timing</th>
                 <th className="px-4 py-3">Cost</th>
                 <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -290,10 +444,30 @@ function RunHistoryCard({ runs }: { runs: AiRunListRow[] }) {
                   </td>
                   <td className="px-4 py-3 text-muted">{r.costUsd !== null ? `$${r.costUsd.toFixed(4)}` : "-"}</td>
                   <td className="px-4 py-3 text-muted">{formatDate(r.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    {r.status === "failed" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!canMutate || busyId === r.id}
+                        onClick={() => retry(r)}
+                      >
+                        {busyId === r.id ? "Retrying…" : "Retry"}
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted">-</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {(feedback || !canMutate) && (
+        <div className="border-t border-slate-100 px-5 py-3">
+          <ErrorText>{feedback && !feedback.ok ? feedback.text : null}</ErrorText>
+          <p className="text-xs text-muted">{feedback?.ok ? feedback.text : ""}</p>
         </div>
       )}
     </Card>
@@ -423,16 +597,26 @@ function AiControlsPage() {
       </div>
 
       <div className="flex flex-col gap-6">
+        {loader.settingsResult && loader.settingsResult.ok ? (
+          <EngineLimitsCard settings={loader.settingsResult.settings} canMutate={canMutate} />
+        ) : (
+          <Card className="px-4 py-3">
+            <ErrorText>
+              {(loader.settingsResult && !loader.settingsResult.ok && loader.settingsResult.error) ||
+                "Could not load the engine limits."}
+            </ErrorText>
+          </Card>
+        )}
         <DataSourcesCard sources={data.dataSources} canMutate={canMutate} />
         <OptOutsCard rows={data.optOuts} />
-        <RunHistoryCard runs={data.runs} />
+        <RunHistoryCard runs={data.runs} canMutate={canMutate} />
         <AuditTrailCard events={data.auditEvents} />
       </div>
 
       {!canMutate && (
         <p className="mt-4 text-xs text-muted">
-          Read-only view. Data-source toggles and manual re-runs require an operations, compliance or
-          super_admin staff role.
+          Read-only view. Data-source toggles, retries, engine-limit edits and manual re-runs require
+          an operations, compliance or super_admin staff role.
         </p>
       )}
     </div>

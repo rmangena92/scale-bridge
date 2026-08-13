@@ -831,22 +831,40 @@ export const updateAdminUpsellNotes = createServerFn({ method: "POST" })
 // pattern: every mutation runs in an asUser(admin, 'sb_admin') batch and
 // writes immutable audit rows in the same transaction).
 import {
+  doGetAiControlSettings,
   doGetAiControlsOverview,
   doGetAiRunDetail,
   doReRunAiAnalysis,
+  doRetryAiRun,
   doToggleAiDataSource,
+  doUpdateAiControlSettings,
 } from "./admin-ai-controls-core";
-import { AI_CONTROL_MUTATE_ROLES, AI_RUN_STATUS_LABELS, AI_SOURCE_LABELS, AI_TRIGGER_LABELS } from "./ai-control-constants";
+import {
+  AI_CONTROL_MUTATE_ROLES,
+  AI_CONTROL_SETTING_FIELDS,
+  AI_RUN_STATUS_LABELS,
+  AI_SOURCE_LABELS,
+  AI_TRIGGER_LABELS,
+} from "./ai-control-constants";
 export type {
   AiAuditRow,
   AiControlResult,
+  AiControlSettingsResult,
+  AiControlSettingsRow,
   AiControlsOverview,
   AiDataSourceRow,
   AiOptOutRow,
+  AiRetryResult,
   AiRunDetailResult,
   AiRunListRow,
 } from "./admin-ai-controls-core";
-export { AI_CONTROL_MUTATE_ROLES, AI_RUN_STATUS_LABELS, AI_SOURCE_LABELS, AI_TRIGGER_LABELS };
+export {
+  AI_CONTROL_MUTATE_ROLES,
+  AI_CONTROL_SETTING_FIELDS,
+  AI_RUN_STATUS_LABELS,
+  AI_SOURCE_LABELS,
+  AI_TRIGGER_LABELS,
+};
 export const getAdminAiControls = createServerFn({ method: "GET" }).handler(async () => {
   const session = await getAdminSession();
   const actor = await resolveAdminActor(session);
@@ -876,4 +894,34 @@ export const rerunAiAnalysis = createServerFn({ method: "POST" })
     const actor = await resolveAdminActor(session);
     if (!actor) return { ok: false as const, error: "Admin session required." };
     return doReRunAiAnalysis(actor, data.runId);
+  });
+export const retryAiRun = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as { runId: string })
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doRetryAiRun(actor, data.runId);
+  });
+export const getAdminAiControlSettings = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await getAdminSession();
+  const actor = await resolveAdminActor(session);
+  if (!actor) return { ok: false as const, error: "Admin session required." };
+  return doGetAiControlSettings(actor);
+});
+export const updateAdminAiControlSettings = createServerFn({ method: "POST" })
+  .validator(
+    (d: unknown) =>
+      d as {
+        dailyRunCap?: number | null;
+        perCompanyDailyCap?: number | null;
+        minIntervalSeconds?: number | null;
+        autoRunEnabled?: boolean | null;
+      },
+  )
+  .handler(async ({ data }) => {
+    const session = await getAdminSession();
+    const actor = await resolveAdminActor(session);
+    if (!actor) return { ok: false as const, error: "Admin session required." };
+    return doUpdateAiControlSettings(actor, data);
   });

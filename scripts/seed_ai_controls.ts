@@ -202,13 +202,31 @@ if (!togRows[0]) {
   }
 }
 
+// ai_control_settings (engine limits, Phase 2a): seed defaults if absent
+const [, settingsRows] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
+  tx`select id from ai_control_settings where id = 1`,
+])) as unknown as [unknown, { id: number }[]];
+if (!settingsRows[0]) {
+  await asUser(ADMIN_ID, "sb_admin", (tx) => [
+    tx`insert into ai_control_settings (id, daily_run_cap, per_company_daily_cap, min_interval_seconds, auto_run_enabled)
+       values (1, 50, 10, 60, true)`,
+    tx`insert into ai_audit_events (id, actor_type, actor_id, action, entity_type, entity_id, details)
+       values (${randomUUID()}, 'system', 'agent:0.1.0', 'ai.control.settings_update', 'ai_control_settings', '1',
+               ${{ from: null, to: { dailyRunCap: 50, perCompanyDailyCap: 10, minIntervalSeconds: 60, autoRunEnabled: true } } as never})`,
+  ]);
+  created++;
+  console.log("  ai-controls: settings + (engine limits defaults)");
+} else {
+  console.log("  ai-controls: settings row exists (id=1)");
+}
 const [, overview] = (await asUser(ADMIN_ID, "sb_admin", (tx) => [
   tx`select
       (select count(*)::int from ai_data_source_registry) as sources,
       (select count(*)::int from ai_agent_runs) as runs,
       (select count(*)::int from ai_audit_events) as audit_events,
-      (select count(*)::int from company_ai_preferences where opt_out) as opted_out`,
-])) as unknown as [unknown, { sources: number; runs: number; audit_events: number; opted_out: number }[]];
+      (select count(*)::int from company_ai_preferences where opt_out) as opted_out,
+      (select count(*)::int from ai_control_settings) as settings`,
+])) as unknown as [unknown, { sources: number; runs: number; audit_events: number; opted_out: number; settings: number }[]];
 console.log(
   created > 0 ? `ai-controls: created ${created} new rows` : "ai-controls: nothing to create (idempotent)",
 );

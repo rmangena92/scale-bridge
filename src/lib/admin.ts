@@ -839,7 +839,13 @@ import {
   doToggleAiDataSource,
   doUpdateAiControlSettings,
 } from "./admin-ai-controls-core";
-import { AI_CONTROL_MUTATE_ROLES, AI_RUN_STATUS_LABELS, AI_SOURCE_LABELS, AI_TRIGGER_LABELS } from "./ai-control-constants";
+import {
+  AI_CONTROL_MUTATE_ROLES,
+  AI_CONTROL_SETTING_FIELDS,
+  AI_RUN_STATUS_LABELS,
+  AI_SOURCE_LABELS,
+  AI_TRIGGER_LABELS,
+} from "./ai-control-constants";
 export type {
   AiAuditRow,
   AiControlResult,

@@ -62,8 +62,10 @@ import { Route as AdminAiInsightsRouteImport } from './routes/admin/ai-insights'
 import { Route as ClientContractsIndexRouteImport } from './routes/client/contracts/index'
 import { Route as AdminVerificationIndexRouteImport } from './routes/admin/verification/index'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin/users/index'
+import { Route as AdminUpsellsIndexRouteImport } from './routes/admin/upsells/index'
 import { Route as AdminSupportIndexRouteImport } from './routes/admin/support/index'
 import { Route as AdminSettingsIndexRouteImport } from './routes/admin/settings/index'
+import { Route as AdminServicesIndexRouteImport } from './routes/admin/services/index'
 import { Route as AdminContractsIndexRouteImport } from './routes/admin/contracts/index'
 import { Route as AdminCompaniesIndexRouteImport } from './routes/admin/companies/index'
 import { Route as ClientContractsWorkspaceIdRouteImport } from './routes/client/contracts/$workspaceId'
@@ -344,6 +346,11 @@ const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminUsersRoute,
 } as any)
+const AdminUpsellsIndexRoute = AdminUpsellsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminUpsellsRoute,
+} as any)
 const AdminSupportIndexRoute = AdminSupportIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -353,6 +360,11 @@ const AdminSettingsIndexRoute = AdminSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AdminSettingsRoute,
+} as any)
+const AdminServicesIndexRoute = AdminServicesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminServicesRoute,
 } as any)
 const AdminContractsIndexRoute = AdminContractsIndexRouteImport.update({
   id: '/',
@@ -494,8 +506,10 @@ export interface FileRoutesByFullPath {
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
+  '/admin/services/': typeof AdminServicesIndexRoute
   '/admin/settings/': typeof AdminSettingsIndexRoute
   '/admin/support/': typeof AdminSupportIndexRoute
+  '/admin/upsells/': typeof AdminUpsellsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
@@ -522,9 +536,7 @@ export interface FileRoutesByTo {
   '/admin/login': typeof AdminLoginRoute
   '/admin/opportunities': typeof AdminOpportunitiesRoute
   '/admin/reports': typeof AdminReportsRoute
-  '/admin/services': typeof AdminServicesRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
-  '/admin/upsells': typeof AdminUpsellsRouteWithChildren
   '/admin/workspaces': typeof AdminWorkspacesRoute
   '/client/approvals': typeof ClientApprovalsRoute
   '/client/documents': typeof ClientDocumentsRoute
@@ -555,8 +567,10 @@ export interface FileRoutesByTo {
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies': typeof AdminCompaniesIndexRoute
   '/admin/contracts': typeof AdminContractsIndexRoute
+  '/admin/services': typeof AdminServicesIndexRoute
   '/admin/settings': typeof AdminSettingsIndexRoute
   '/admin/support': typeof AdminSupportIndexRoute
+  '/admin/upsells': typeof AdminUpsellsIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/admin/verification': typeof AdminVerificationIndexRoute
   '/client/contracts': typeof ClientContractsIndexRoute
@@ -627,8 +641,10 @@ export interface FileRoutesById {
   '/client/contracts/$workspaceId': typeof ClientContractsWorkspaceIdRoute
   '/admin/companies/': typeof AdminCompaniesIndexRoute
   '/admin/contracts/': typeof AdminContractsIndexRoute
+  '/admin/services/': typeof AdminServicesIndexRoute
   '/admin/settings/': typeof AdminSettingsIndexRoute
   '/admin/support/': typeof AdminSupportIndexRoute
+  '/admin/upsells/': typeof AdminUpsellsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/admin/verification/': typeof AdminVerificationIndexRoute
   '/client/contracts/': typeof ClientContractsIndexRoute
@@ -700,8 +716,10 @@ export interface FileRouteTypes {
     | '/client/contracts/$workspaceId'
     | '/admin/companies/'
     | '/admin/contracts/'
+    | '/admin/services/'
     | '/admin/settings/'
     | '/admin/support/'
+    | '/admin/upsells/'
     | '/admin/users/'
     | '/admin/verification/'
     | '/client/contracts/'
@@ -728,9 +746,7 @@ export interface FileRouteTypes {
     | '/admin/login'
     | '/admin/opportunities'
     | '/admin/reports'
-    | '/admin/services'
     | '/admin/subscriptions'
-    | '/admin/upsells'
     | '/admin/workspaces'
     | '/client/approvals'
     | '/client/documents'
@@ -761,8 +777,10 @@ export interface FileRouteTypes {
     | '/client/contracts/$workspaceId'
     | '/admin/companies'
     | '/admin/contracts'
+    | '/admin/services'
     | '/admin/settings'
     | '/admin/support'
+    | '/admin/upsells'
     | '/admin/users'
     | '/admin/verification'
     | '/client/contracts'
@@ -832,8 +850,10 @@ export interface FileRouteTypes {
     | '/client/contracts/$workspaceId'
     | '/admin/companies/'
     | '/admin/contracts/'
+    | '/admin/services/'
     | '/admin/settings/'
     | '/admin/support/'
+    | '/admin/upsells/'
     | '/admin/users/'
     | '/admin/verification/'
     | '/client/contracts/'
@@ -1230,6 +1250,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersIndexRouteImport
       parentRoute: typeof AdminUsersRoute
     }
+    '/admin/upsells/': {
+      id: '/admin/upsells/'
+      path: '/'
+      fullPath: '/admin/upsells/'
+      preLoaderRoute: typeof AdminUpsellsIndexRouteImport
+      parentRoute: typeof AdminUpsellsRoute
+    }
     '/admin/support/': {
       id: '/admin/support/'
       path: '/'
@@ -1243,6 +1270,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/settings/'
       preLoaderRoute: typeof AdminSettingsIndexRouteImport
       parentRoute: typeof AdminSettingsRoute
+    }
+    '/admin/services/': {
+      id: '/admin/services/'
+      path: '/'
+      fullPath: '/admin/services/'
+      preLoaderRoute: typeof AdminServicesIndexRouteImport
+      parentRoute: typeof AdminServicesRoute
     }
     '/admin/contracts/': {
       id: '/admin/contracts/'
@@ -1393,11 +1427,13 @@ const AdminContractsRouteWithChildren = AdminContractsRoute._addFileChildren(
 interface AdminServicesRouteChildren {
   AdminServicesServiceIdRoute: typeof AdminServicesServiceIdRoute
   AdminServicesCategoriesRoute: typeof AdminServicesCategoriesRoute
+  AdminServicesIndexRoute: typeof AdminServicesIndexRoute
 }
 
 const AdminServicesRouteChildren: AdminServicesRouteChildren = {
   AdminServicesServiceIdRoute: AdminServicesServiceIdRoute,
   AdminServicesCategoriesRoute: AdminServicesCategoriesRoute,
+  AdminServicesIndexRoute: AdminServicesIndexRoute,
 }
 
 const AdminServicesRouteWithChildren = AdminServicesRoute._addFileChildren(
@@ -1434,10 +1470,12 @@ const AdminSupportRouteWithChildren = AdminSupportRoute._addFileChildren(
 
 interface AdminUpsellsRouteChildren {
   AdminUpsellsOpportunityIdRoute: typeof AdminUpsellsOpportunityIdRoute
+  AdminUpsellsIndexRoute: typeof AdminUpsellsIndexRoute
 }
 
 const AdminUpsellsRouteChildren: AdminUpsellsRouteChildren = {
   AdminUpsellsOpportunityIdRoute: AdminUpsellsOpportunityIdRoute,
+  AdminUpsellsIndexRoute: AdminUpsellsIndexRoute,
 }
 
 const AdminUpsellsRouteWithChildren = AdminUpsellsRoute._addFileChildren(

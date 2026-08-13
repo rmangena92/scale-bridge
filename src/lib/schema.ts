@@ -781,6 +781,27 @@ export const SCHEMA_SQL: string[] = [
   // ------------------------------------------------------------------
   // Indexes
   // ------------------------------------------------------------------
+  // Platform-level engine rate-limit + automation settings (Master Admin AI
+  // Controls Phase 2a). Single-row config (id = 1 enforced by the PK check);
+  // the engine (ai-agent.ts) consults it before starting any run and audits
+  // ai.run.rate_limited when a cap blocks a run. Editable only by sb_admin
+  // (RLS below); every change is dual-audited (ai.control.settings_update).
+  `create table if not exists ai_control_settings (
+    id integer primary key default 1 check (id = 1),
+    daily_run_cap integer not null default 50,
+    per_company_daily_cap integer not null default 10,
+    min_interval_seconds integer not null default 60,
+    auto_run_enabled boolean not null default true,
+    updated_by uuid references users(id) on delete set null,
+    updated_at timestamptz not null default now()
+  )`,
+  // Phase 2a: the engine can now start runs with trigger 'retry' (Master Admin
+  // retry control for failed runs) - widen the existing check constraint.
+  `alter table ai_agent_runs drop constraint if exists ai_agent_runs_trigger_check`,
+  `alter table ai_agent_runs add constraint ai_agent_runs_trigger_check check (
+    trigger in ('profile_update','intake','uploaded_document','contract_participation','manual','manual_re-run','retry')
+  )`,
+
   `create index if not exists sessions_token_hash_idx on sessions (token_hash)`,
   `create index if not exists ai_agent_runs_created_at_idx on ai_agent_runs (created_at desc)`,
   `create index if not exists ai_audit_events_created_at_idx on ai_audit_events (created_at desc)`,
@@ -934,6 +955,8 @@ export const SCHEMA_SQL: string[] = [
   `alter table ai_data_source_permissions force row level security`,
   `alter table company_ai_preferences force row level security`,
   `alter table ai_audit_events force row level security`,
+  `alter table ai_control_settings enable row level security`,
+  `alter table ai_control_settings force row level security`,
 
   // --- profiles: users manage their own profile; sb_admin manages all ----
   `drop policy if exists profiles_select on profiles`,
@@ -1682,6 +1705,15 @@ export const SCHEMA_SQL: string[] = [
   `create policy ai_data_source_registry_update on ai_data_source_registry for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
   `drop policy if exists ai_data_source_registry_delete on ai_data_source_registry`,
   `create policy ai_data_source_registry_delete on ai_data_source_registry for delete using (${IS_ADMIN})`,
+  // ai_control_settings: single-row engine config; sb_admin only.
+  `drop policy if exists ai_control_settings_select on ai_control_settings`,
+  `create policy ai_control_settings_select on ai_control_settings for select using (${IS_ADMIN})`,
+  `drop policy if exists ai_control_settings_insert on ai_control_settings`,
+  `create policy ai_control_settings_insert on ai_control_settings for insert with check (${IS_ADMIN})`,
+  `drop policy if exists ai_control_settings_update on ai_control_settings`,
+  `create policy ai_control_settings_update on ai_control_settings for update using (${IS_ADMIN}) with check (${IS_ADMIN})`,
+  `drop policy if exists ai_control_settings_delete on ai_control_settings`,
+  `create policy ai_control_settings_delete on ai_control_settings for delete using (${IS_ADMIN})`,
   // ------------------------------------------------------------------
   // Portal-phase policies (Admin + Client portals).
   //
@@ -3092,4 +3124,10 @@ export const SCHEMA_SQL: string[] = [
      'Public directories, registries and third-party sources with a captured source_url. Used only when the company has granted public-source consent.',
      null, true, true)
    on conflict (source) do nothing`,
+  // Master Admin AI Controls Phase 2a: engine rate-limit + automation
+  // defaults (single row, id = 1). Admins edit via the Engine limits card
+  // on /admin/ai; every change is dual-audited.
+  `insert into ai_control_settings (id, daily_run_cap, per_company_daily_cap, min_interval_seconds, auto_run_enabled)
+   values (1, 50, 10, 60, true)
+   on conflict (id) do nothing`,
 ];

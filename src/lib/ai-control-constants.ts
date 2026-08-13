@@ -25,6 +25,7 @@ export const AI_TRIGGER_LABELS: Record<string, string> = {
   contract_participation: "Contract participation",
   manual: "Manual",
   "manual_re-run": "Manual re-run",
+  retry: "Retry",
 };
 
 /** Human-friendly labels for AI run statuses. */
@@ -34,3 +35,31 @@ export const AI_RUN_STATUS_LABELS: Record<string, string> = {
   completed: "Completed",
   failed: "Failed",
 };
+
+/** Engine limit settings surfaced on the /admin/ai "Engine limits" card.
+ *  Field keys map to the ai_control_settings columns (camelCase). */
+export const AI_CONTROL_SETTING_FIELDS: {
+  key: "dailyRunCap" | "perCompanyDailyCap" | "minIntervalSeconds";
+  label: string;
+  description: string;
+  unit: string;
+}[] = [
+  {
+    key: "dailyRunCap",
+    label: "Daily run cap",
+    description: "Maximum AI agent runs across all companies per day (UTC).",
+    unit: "runs / day",
+  },
+  {
+    key: "perCompanyDailyCap",
+    label: "Per-company daily cap",
+    description: "Maximum runs for a single company per day.",
+    unit: "runs / company / day",
+  },
+  {
+    key: "minIntervalSeconds",
+    label: "Minimum interval",
+    description: "Minimum seconds between two runs for the same company.",
+    unit: "seconds",
+  },
+];

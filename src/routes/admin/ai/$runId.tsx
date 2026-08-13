@@ -6,6 +6,7 @@ import {
   getAdminAiRunDetail,
   getAdminSession,
   rerunAiAnalysis,
+  retryAiRun,
 } from "~/lib/admin";
 import { Badge, Button, Card, DbSetupPage, ErrorText, EmptyState } from "~/components/ui";
 
@@ -66,6 +67,7 @@ function JsonValue({ value }: { value: unknown }) {
 function AiRunDetailPage() {
   const loader = Route.useLoaderData();
   const [rerunning, setRerunning] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string; newRunId?: string } | null>(null);
   const result = useMemo(() => loader.result, [loader.result]);
   const run = result.ok ? result.run : null;
@@ -122,6 +124,28 @@ function AiRunDetailPage() {
     }
   };
 
+  const doRetry = async () => {
+    if (!window.confirm(
+      "Retry this failed AI run? A new run will be queued (trigger: retry), executed immediately " +
+        "and audited immutably. Retries respect the engine limits.",
+    )) return;
+    setRetrying(true);
+    setFeedback(null);
+    try {
+      const r = await retryAiRun({ data: { runId: run.id } });
+      if (r.ok) {
+        setFeedback({ ok: true, text: r.message, newRunId: r.id });
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        setFeedback({ ok: false, text: r.error });
+      }
+    } catch (e) {
+      setFeedback({ ok: false, text: e instanceof Error ? e.message : "Could not retry the run." });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -129,6 +153,11 @@ function AiRunDetailPage() {
           &larr; Back to AI Controls
         </Link>
         <div className="flex items-center gap-3">
+          {canMutate && run.status === "failed" && (
+            <Button variant="outline" size="sm" onClick={doRetry} disabled={retrying}>
+              {retrying ? "Retrying…" : "Retry"}
+            </Button>
+          )}
           {canMutate && (
             <Button variant="primary" size="sm" onClick={doRerun} disabled={rerunning}>
               {rerunning ? "Re-running…" : "Re-run analysis"}
@@ -296,7 +325,8 @@ function AiRunDetailPage() {
 
       {!canMutate && (
         <p className="mt-4 text-xs text-muted">
-          Read-only view. Manual re-runs require an operations, compliance or super_admin staff role.
+          Read-only view. Manual re-runs and retries require an operations, compliance or super_admin
+          staff role.
         </p>
       )}
     </div>

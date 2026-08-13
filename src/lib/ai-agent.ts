@@ -55,8 +55,96 @@ export const AI_RUN_TRIGGERS = [
   "contract_participation",
   "manual",
   "manual_re-run",
+  "retry",
 ] as const;
 export type AiRunTrigger = (typeof AI_RUN_TRIGGERS)[number];
+
+/** Triggers that are explicitly human-initiated. auto_run_enabled=false only
+ *  blocks non-manual triggers (profile_update / intake / uploaded_document /
+ *  contract_participation); manual re-runs and retries still work. */
+export const AI_MANUAL_TRIGGERS = new Set<string>(["manual", "manual_re-run", "retry"]);
+
+/** Platform engine-control settings (ai_control_settings, single row id=1)
+ *  mirrored for the engine. Defaults match the schema defaults so the engine
+ *  still works if the row has not been seeded yet. */
+export type AiControlSettings = {
+  dailyRunCap: number;
+  perCompanyDailyCap: number;
+  minIntervalSeconds: number;
+  autoRunEnabled: boolean;
+};
+
+export const AI_CONTROL_SETTING_DEFAULTS: AiControlSettings = {
+  dailyRunCap: 50,
+  perCompanyDailyCap: 10,
+  minIntervalSeconds: 60,
+  autoRunEnabled: true,
+};
+
+/** Read the platform engine-control settings through asUser (the table is
+ *  FORCE RLS, sb_admin-only). Falls back to defaults when absent. */
+async function loadAiControlSettings(actorId: string): Promise<AiControlSettings> {
+  try {
+    const rows = (await asUser(actorId, "sb_admin", (tx) => [
+      tx`select daily_run_cap, per_company_daily_cap, min_interval_seconds, auto_run_enabled
+         from ai_control_settings where id = 1 limit 1`,
+    ]))[1] as {
+      daily_run_cap: number;
+      per_company_daily_cap: number;
+      min_interval_seconds: number;
+      auto_run_enabled: boolean;
+    }[];
+    const r = rows[0];
+    if (!r) return { ...AI_CONTROL_SETTING_DEFAULTS };
+    return {
+      dailyRunCap: Number(r.daily_run_cap),
+      perCompanyDailyCap: Number(r.per_company_daily_cap),
+      minIntervalSeconds: Number(r.min_interval_seconds),
+      autoRunEnabled: r.auto_run_enabled,
+    };
+  } catch (err) {
+    console.error("loadAiControlSettings failed:", err);
+    return { ...AI_CONTROL_SETTING_DEFAULTS };
+  }
+}
+
+/** Check platform rate limits + automation switch before a new run starts.
+ *  Returns null when the run may proceed, else a "rate limited: …" reason.
+ *  Counts include every run created today (created_at >= midnight) — including
+ *  rate-limited rows — so the caps cannot be bypassed by rapid retries. */
+async function checkAiRunRateLimit(
+  actorId: string,
+  companyId: string,
+  trigger: string,
+): Promise<string | null> {
+  const settings = await loadAiControlSettings(actorId);
+  if (!settings.autoRunEnabled && !AI_MANUAL_TRIGGERS.has(trigger)) {
+    return "rate limited: automatic runs are disabled (auto_run_enabled=false)";
+  }
+  const rows = (await asUser(actorId, "sb_admin", (tx) => [
+    tx`select count(*)::int as n from ai_agent_runs
+       where created_at >= date_trunc('day', now())`,
+    tx`select count(*)::int as n from ai_agent_runs
+       where company_id = ${companyId} and created_at >= date_trunc('day', now())`,
+    tx`select max(created_at) as last_at from ai_agent_runs where company_id = ${companyId}`,
+  ])) as unknown as [unknown, { n: number }[], { n: number }[], { last_at: string | null }[]];
+  const todayGlobal = rows[1][0]?.n ?? 0;
+  const todayCompany = rows[2][0]?.n ?? 0;
+  const lastAt = rows[3][0]?.last_at ?? null;
+  if (todayGlobal >= settings.dailyRunCap) {
+    return `rate limited: daily run cap reached (${todayGlobal}/${settings.dailyRunCap} runs today)`;
+  }
+  if (todayCompany >= settings.perCompanyDailyCap) {
+    return `rate limited: per-company daily cap reached (${todayCompany}/${settings.perCompanyDailyCap} runs today)`;
+  }
+  if (lastAt && settings.minIntervalSeconds > 0) {
+    const since = (Date.now() - new Date(lastAt).getTime()) / 1000;
+    if (since < settings.minIntervalSeconds) {
+      return `rate limited: minimum interval between runs not met (${Math.ceil(settings.minIntervalSeconds - since)}s remaining)`;
+    }
+  }
+  return null;
+}
 
 export const AI_RUN_STATUSES = ["queued", "running", "completed", "failed"] as const;
 export type AiRunStatus = (typeof AI_RUN_STATUSES)[number];
@@ -765,6 +853,35 @@ export async function analyzeCompany(
     tx`select id from companies where id = ${companyId}`,
   ]))[1] as { id: string }[];
   if (!rows[0]) return { ok: false, error: "Company not found." };
+
+  // Platform rate limits + automation switch (Master Admin AI Controls Phase
+  // 2a). Applies to every trigger, including manual re-runs and retries. When
+  // blocked, record a failed run row (so the block is visible in run history)
+  // and dual-audit ai.run.rate_limited in the same transaction.
+  const rateLimited = await checkAiRunRateLimit(actorId, companyId, t);
+  if (rateLimited) {
+    const blocked = (await asUser(actorId, "sb_admin", (tx) => [
+      tx`insert into ai_agent_runs (company_id, trigger, status, agent_version, prompt_model, started_at, finished_at, error, run_metadata)
+         values (${companyId}, ${t}, 'failed', ${AGENT_VERSION}, ${PROMPT_MODEL}, now(), now(),
+                 ${rateLimited.slice(0, 2000)}, ${{ rateLimited, dryRun } as never})
+         returning id`,
+      aiAuditQuery(tx, {
+        actorType: "system",
+        actorId: `agent:${AGENT_VERSION}`,
+        action: "ai.run.rate_limited",
+        entityType: "ai_agent_run",
+        details: { companyId, trigger: t, reason: rateLimited.slice(0, 500), dryRun },
+      }),
+      auditQuery(tx, actorId, "ai.agent.run.rate_limited", {
+        companyId,
+        trigger: t,
+        reason: rateLimited.slice(0, 500),
+        dryRun,
+      }),
+    ])) as unknown[];
+    const blockedRunId = (blocked[1] as { id: string }[])[0]?.id ?? null;
+    return { ok: false, error: rateLimited, companyId, runId: blockedRunId ?? undefined };
+  }
 
   const inserted = (await asUser(actorId, "sb_admin", (tx) => [
     tx`insert into ai_agent_runs (company_id, trigger, status, agent_version, prompt_model)

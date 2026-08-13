@@ -127,6 +127,26 @@ export type AiRunDetailResult =
     }
   | { ok: false; error: string };
 
+export type AiControlSettingsRow = {
+  dailyRunCap: number;
+  perCompanyDailyCap: number;
+  minIntervalSeconds: number;
+  autoRunEnabled: boolean;
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+
+export type AiControlSettingsResult =
+  | { ok: true; settings: AiControlSettingsRow }
+  | { ok: false; error: string };
+
+/** Result of a manual retry of a failed run. retry_blocked means the retry was
+ *  refused before the engine started (opt-out or no enabled data source); the
+ *  reason is audited as ai.run.retry_blocked. */
+export type AiRetryResult =
+  | { ok: true; message: string; id?: string }
+  | { ok: false; error: string; code?: string; retryBlocked?: boolean };
+
 const num = (v: unknown): number => {
   const n = Number(v);
   return Number.isNaN(n) ? 0 : n;
@@ -504,5 +524,228 @@ export async function doReRunAiAnalysis(
   } catch (err) {
     console.error("doReRunAiAnalysis failed:", err);
     return { ok: false, error: "Could not re-run the analysis." };
+  }
+}
+
+
+// ------------------------------------------------------- retry failed run
+/** Retry a failed AI run: allowed only when the run is 'failed' (or a stale
+ *  'queued' with no started_at). Engine-gate first: an opted-out company or a
+ *  platform state with no enabled data source refuses the retry (retry_blocked,
+ *  audited) instead of running the engine. Otherwise queues + executes a new
+ *  run through the existing engine path (trigger 'retry') — the engine applies
+ *  the rate-limit caps and writes the run lifecycle audit events itself. */
+export async function doRetryAiRun(admin: AdminActor, runId: string): Promise<AiRetryResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED" };
+  const denied = requireAiControlMutate(admin);
+  if (denied) return { ok: false, error: denied, code: "ROLE_DENIED" };
+  if (!runId) return { ok: false, error: "Run id is required." };
+  try {
+    await ensureSchema();
+    const [, runRows, prefRows, sourceRows] = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select id, company_id, trigger, status, started_at from ai_agent_runs where id = ${runId} limit 1`,
+      tx`select coalesce(opt_out, false) as opt_out
+         from company_ai_preferences where company_id = (select company_id from ai_agent_runs where id = ${runId})`,
+      tx`select count(*)::int as n from ai_data_source_registry where enabled = true`,
+    ])) as unknown as [
+      unknown,
+      { id: string; company_id: string; trigger: string; status: string; started_at: string | null }[],
+      { opt_out: boolean }[],
+      { n: number }[],
+    ];
+    const run = runRows[0];
+    if (!run) return { ok: false, error: "AI run not found." };
+    const retryable = run.status === "failed" || (run.status === "queued" && !run.started_at);
+    if (!retryable) {
+      return {
+        ok: false,
+        error: `Only failed runs can be retried (this run is ${run.status}).`,
+        code: "NOT_RETRYABLE",
+      };
+    }
+
+    // Engine gate: opt-out or no enabled data source -> refuse + audit.
+    const optOut = prefRows[0]?.opt_out ?? false;
+    const enabledSources = sourceRows[0]?.n ?? 0;
+    let blockedReason: string | null = null;
+    if (optOut) blockedReason = "the company has opted out of AI analysis";
+    else if (enabledSources === 0) blockedReason = "no data sources are enabled at platform level";
+    if (blockedReason) {
+      await asUser(admin.id, "sb_admin", (tx) => [
+        aiControlAuditQuery(tx, admin.id, "ai.control.retry_blocked", {
+          runId,
+          companyId: run.company_id,
+          sourceStatus: run.status,
+          reason: blockedReason,
+        }),
+        aiAuditQuery(tx, {
+          actorType: "admin",
+          actorId: admin.id,
+          action: "ai.run.retry_blocked",
+          entityType: "ai_agent_run",
+          entityId: runId,
+          details: { companyId: run.company_id, sourceStatus: run.status, reason: blockedReason },
+        }),
+      ]);
+      return { ok: false, error: `Retry blocked: ${blockedReason}.`, code: "RETRY_BLOCKED", retryBlocked: true };
+    }
+
+    // Same engine path as the manual re-run; the engine audits its own
+    // queued/started/completed|failed lifecycle and applies rate limits.
+    const result = await analyzeCompany(admin.id, run.company_id, "retry");
+    if (!result.ok || !result.runId) {
+      return { ok: false, error: result.error ?? "Retry failed." };
+    }
+    // Admin audit tying the retry to its source run (dual, immutable).
+    await asUser(admin.id, "sb_admin", (tx) => [
+      aiControlAuditQuery(tx, admin.id, "ai.control.retry", {
+        sourceRunId: runId,
+        sourceStatus: run.status,
+        companyId: run.company_id,
+        newRunId: result.runId,
+      }),
+      aiAuditQuery(tx, {
+        actorType: "admin",
+        actorId: admin.id,
+        action: "ai.run.retry",
+        entityType: "ai_agent_run",
+        entityId: result.runId,
+        details: { sourceRunId: runId, companyId: run.company_id, newRunId: result.runId },
+      }),
+    ]);
+    return {
+      ok: true,
+      message: "Retry queued — the analysis is running for this company.",
+      id: result.runId,
+    };
+  } catch (err) {
+    console.error("doRetryAiRun failed:", err);
+    return { ok: false, error: "Could not retry the analysis." };
+  }
+}
+
+// --------------------------------------------------- engine limit settings
+const SETTINGS_DEFAULTS = {
+  dailyRunCap: 50,
+  perCompanyDailyCap: 10,
+  minIntervalSeconds: 60,
+  autoRunEnabled: true,
+};
+
+export async function doGetAiControlSettings(admin: AdminActor): Promise<AiControlSettingsResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED" };
+  try {
+    await ensureSchema();
+    const rows = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select daily_run_cap, per_company_daily_cap, min_interval_seconds,
+                auto_run_enabled, updated_by, updated_at
+         from ai_control_settings where id = 1 limit 1`,
+    ]))[1] as {
+      daily_run_cap: number;
+      per_company_daily_cap: number;
+      min_interval_seconds: number;
+      auto_run_enabled: boolean;
+      updated_by: string | null;
+      updated_at: string | null;
+    }[];
+    const r = rows[0];
+    return {
+      ok: true,
+      settings: r
+        ? {
+            dailyRunCap: num(r.daily_run_cap),
+            perCompanyDailyCap: num(r.per_company_daily_cap),
+            minIntervalSeconds: num(r.min_interval_seconds),
+            autoRunEnabled: r.auto_run_enabled,
+            updatedBy: r.updated_by,
+            updatedAt: r.updated_at ? String(r.updated_at) : null,
+          }
+        : { ...SETTINGS_DEFAULTS, updatedBy: null, updatedAt: null },
+    };
+  } catch (err) {
+    console.error("doGetAiControlSettings failed:", err);
+    return { ok: false, error: "Could not load the AI engine limits." };
+  }
+}
+
+/** Update the single-row engine-control settings. Validates ints >= 0, keeps
+ *  unspecified fields, and dual-audits old -> new values in the same
+ *  transaction. Role-gated via requireAiControlMutate. */
+export async function doUpdateAiControlSettings(
+  admin: AdminActor,
+  input: {
+    dailyRunCap?: number | null;
+    perCompanyDailyCap?: number | null;
+    minIntervalSeconds?: number | null;
+    autoRunEnabled?: boolean | null;
+  },
+): Promise<AiControlResult> {
+  if (!dbConfigured()) return { ok: false, error: "SETUP_REQUIRED" };
+  const denied = requireAiControlMutate(admin);
+  if (denied) return { ok: false, error: denied, code: "ROLE_DENIED" };
+  try {
+    await ensureSchema();
+    const current = (await asUser(admin.id, "sb_admin", (tx) => [
+      tx`select daily_run_cap, per_company_daily_cap, min_interval_seconds, auto_run_enabled
+         from ai_control_settings where id = 1 limit 1`,
+    ]))[1] as {
+      daily_run_cap: number;
+      per_company_daily_cap: number;
+      min_interval_seconds: number;
+      auto_run_enabled: boolean;
+    }[];
+    const cur = current[0] ?? { ...SETTINGS_DEFAULTS };
+
+    const toInt = (v: number | null | undefined, fallback: number, label: string): number => {
+      if (v === null || v === undefined) return fallback;
+      const n = Math.floor(Number(v));
+      if (!Number.isFinite(n) || n < 0) {
+        throw new Error(`${label} must be a whole number of 0 or more.`);
+      }
+      return n;
+    };
+    const next = {
+      dailyRunCap: toInt(input.dailyRunCap, num(cur.daily_run_cap), "Daily run cap"),
+      perCompanyDailyCap: toInt(input.perCompanyDailyCap, num(cur.per_company_daily_cap), "Per-company daily cap"),
+      minIntervalSeconds: toInt(input.minIntervalSeconds, num(cur.min_interval_seconds), "Minimum interval"),
+      autoRunEnabled: input.autoRunEnabled === null || input.autoRunEnabled === undefined
+        ? cur.auto_run_enabled
+        : Boolean(input.autoRunEnabled),
+    };
+    const from = {
+      dailyRunCap: num(cur.daily_run_cap),
+      perCompanyDailyCap: num(cur.per_company_daily_cap),
+      minIntervalSeconds: num(cur.min_interval_seconds),
+      autoRunEnabled: cur.auto_run_enabled,
+    };
+    if (JSON.stringify(from) === JSON.stringify(next)) {
+      return { ok: false, error: "No changes to save." };
+    }
+
+    await asUser(admin.id, "sb_admin", (tx) => [
+      tx`insert into ai_control_settings (id, daily_run_cap, per_company_daily_cap, min_interval_seconds, auto_run_enabled, updated_by, updated_at)
+         values (1, ${next.dailyRunCap}, ${next.perCompanyDailyCap}, ${next.minIntervalSeconds},
+                 ${next.autoRunEnabled}, ${admin.id}, now())
+         on conflict (id) do update set
+           daily_run_cap = excluded.daily_run_cap,
+           per_company_daily_cap = excluded.per_company_daily_cap,
+           min_interval_seconds = excluded.min_interval_seconds,
+           auto_run_enabled = excluded.auto_run_enabled,
+           updated_by = excluded.updated_by,
+           updated_at = now()`,
+      aiControlAuditQuery(tx, admin.id, "ai.control.settings_update", { from, to: next }),
+      aiAuditQuery(tx, {
+        actorType: "admin",
+        actorId: admin.id,
+        action: "ai.control.settings_update",
+        entityType: "ai_control_settings",
+        entityId: "1",
+        details: { from, to: next },
+      }),
+    ]);
+    return { ok: true, message: "Engine limits saved." };
+  } catch (err) {
+    console.error("doUpdateAiControlSettings failed:", err);
+    return { ok: false, error: err instanceof Error ? err.message : "Could not save the engine limits." };
   }
 }

@@ -21,6 +21,11 @@ export function auditQuery(
   workspaceId?: string | null,
   orgId?: string | null,
 ): ReturnType<Tx> {
+  // Bind the details object directly to the jsonb column (postgres.js serializes
+  // objects to jsonb). Stringifying first double-encodes it (jsonb stores the
+  // string, jsonb_typeof = 'string') — the same bug fixed in ai-agent.ts /
+  // admin-upsells-core.ts. Read-side consumers guard with
+  // typeof details === "string" ? JSON.parse : as-is, so legacy rows stay readable.
   return tx`insert into audit_logs (id, actor_id, workspace_id, client_org_id, action, details)
-    values (${randomUUID()}, ${actorId}, ${workspaceId ?? null}, ${orgId ?? null}, ${action}, ${JSON.stringify(details ?? {})})`;
+    values (${randomUUID()}, ${actorId}, ${workspaceId ?? null}, ${orgId ?? null}, ${action}, ${(details ?? {}) as never})`;
 }

@@ -86,8 +86,8 @@ function ContractDetailPage() {
           <WorkPackagesCard detail={detail} />
         </div>
         <div className="flex flex-col gap-6">
-          <DeliveryCard detail={detail} />
-          <DocumentsCard detail={detail} />
+          <DeliveryCard detail={detail} orgId={orgId} />
+          <DocumentsCard detail={detail} orgId={orgId} />
           <RecentActivityCard detail={detail} />
         </div>
       </div>
@@ -284,10 +284,19 @@ function WorkPackageRow({ wp }: { wp: ClientWorkPackage }) {
   );
 }
 
-function DeliveryCard({ detail }: { detail: ClientContractDetail }) {
+function DeliveryCard({ detail, orgId }: { detail: ClientContractDetail; orgId: string }) {
   return (
     <Card className="p-6">
-      <h2 className="text-lg font-bold">Delivery</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Delivery</h2>
+        <Link
+          to="/client/milestones"
+          search={{ org: orgId, review: undefined }}
+          className="text-xs font-semibold text-brand hover:underline"
+        >
+          Review milestones →
+        </Link>
+      </div>
       <div className="mt-3">
         <p className="text-xs font-bold uppercase tracking-wider text-muted">Milestones</p>
         {detail.milestones.length === 0 ? (
@@ -300,6 +309,15 @@ function DeliveryCard({ detail }: { detail: ClientContractDetail }) {
                 <span className="flex shrink-0 items-center gap-1.5">
                   <Badge tone="slate">{milestoneStatus(m.status)}</Badge>
                   {m.dueDate && <span className="text-xs text-muted">{m.dueDate}</span>}
+                  {m.status === "submitted" && (
+                    <Link
+                      to="/client/milestones"
+                      search={{ org: orgId, review: m.id }}
+                      className="text-xs font-semibold text-brand hover:underline"
+                    >
+                      Sign off
+                    </Link>
+                  )}
                 </span>
               </li>
             ))}
@@ -320,6 +338,15 @@ function DeliveryCard({ detail }: { detail: ClientContractDetail }) {
                 <span className="flex shrink-0 items-center gap-1.5">
                   <Badge tone="slate">{invoiceStatus(i.status)}</Badge>
                   <span className="text-xs font-semibold text-ink">{fmtMoney(i.amount)}</span>
+                  {i.status === "under_review" && (
+                    <Link
+                      to="/client/invoices"
+                      search={{ org: orgId, review: i.id }}
+                      className="text-xs font-semibold text-brand hover:underline"
+                    >
+                      Review
+                    </Link>
+                  )}
                 </span>
               </li>
             ))}
@@ -330,13 +357,23 @@ function DeliveryCard({ detail }: { detail: ClientContractDetail }) {
   );
 }
 
-function DocumentsCard({ detail }: { detail: ClientContractDetail }) {
+function DocumentsCard({ detail, orgId }: { detail: ClientContractDetail; orgId: string }) {
   return (
     <Card className="p-6">
-      <h2 className="text-lg font-bold">Client-visible documents</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Client-visible documents</h2>
+        <Link
+          to="/client/documents"
+          search={{ org: orgId, review: undefined }}
+          className="text-xs font-semibold text-brand hover:underline"
+        >
+          Review documents →
+        </Link>
+      </div>
       {detail.documents.length === 0 ? (
         <p className="mt-3 text-sm text-muted">
-          No client-visible documents shared yet. Full document review ships in Part B.
+          No client-visible documents shared yet. Documents shared for review appear here and on
+          the Documents page.
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-slate-100">
@@ -346,9 +383,20 @@ function DocumentsCard({ detail }: { detail: ClientContractDetail }) {
                 <p className="truncate text-sm font-semibold text-ink">{d.name}</p>
                 <p className="truncate text-xs text-muted">{d.category ?? "document"}</p>
               </div>
-              <Badge tone={d.reviewStatus === "approved" ? "green" : d.reviewStatus === "pending" ? "amber" : "slate"}>
-                {d.reviewStatus}
-              </Badge>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge tone={d.reviewStatus === "approved" ? "green" : d.reviewStatus === "pending" ? "amber" : "slate"}>
+                  {d.reviewStatus === "pending" ? "Under review" : d.reviewStatus}
+                </Badge>
+                {d.reviewStatus === "pending" && (
+                  <Link
+                    to="/client/documents"
+                    search={{ org: orgId, review: d.id }}
+                    className="text-xs font-semibold text-brand hover:underline"
+                  >
+                    Review
+                  </Link>
+                )}
+              </div>
             </li>
           ))}
         </ul>

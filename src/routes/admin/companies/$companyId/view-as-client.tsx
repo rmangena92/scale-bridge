@@ -3,10 +3,17 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Card, EmptyState, ErrorText } from "~/components/ui";
 import {
   exitViewAsClient,
+  getViewAsClientApprovals,
   getViewAsClientContract,
   getViewAsClientDashboard,
+  getViewAsClientDocuments,
+  getViewAsClientInvoices,
+  getViewAsClientIssues,
+  getViewAsClientMilestones,
   getViewAsClientOrg,
+  getViewAsClientReports,
   getViewAsClientSession,
+  getViewAsClientVariations,
   listViewAsClientContracts,
   listViewAsClientConversations,
   listViewAsClientMessages,
@@ -15,16 +22,41 @@ import {
 } from "~/lib/admin-view";
 import type { ViewAsClientSessionInfo } from "~/lib/admin-view";
 import type {
+  ClientApprovals,
   ClientContractDetail,
   ClientContractSummary,
   ClientConversation,
   ClientDashboardStats,
+  ClientDocument,
+  ClientInvoice,
+  ClientIssue,
+  ClientMilestone,
   ClientNotification,
   ClientOrgProfile,
+  ClientProgressReport,
   ClientTeamMember,
   ClientThread,
+  ClientVariation,
 } from "~/lib/types";
-import { CLIENT_MESSAGE_THREAD_LABELS, CLIENT_ROLE_LABELS, WORKSPACE_BADGE_TONES, WORKSPACE_STATUS_LABELS } from "~/lib/types";
+import {
+  CLIENT_DOCUMENT_CATEGORY_LABELS,
+  CLIENT_DOCUMENT_STATUS_LABELS,
+  CLIENT_DOCUMENT_STATUS_TONES,
+  CLIENT_INVOICE_STATUS_LABELS,
+  CLIENT_INVOICE_STATUS_TONES,
+  CLIENT_ISSUE_SEVERITY_LABELS,
+  CLIENT_ISSUE_SEVERITY_TONES,
+  CLIENT_ISSUE_STATUS_LABELS,
+  CLIENT_ISSUE_STATUS_TONES,
+  CLIENT_MESSAGE_THREAD_LABELS,
+  CLIENT_MILESTONE_STATUS_LABELS,
+  CLIENT_MILESTONE_STATUS_TONES,
+  CLIENT_ROLE_LABELS,
+  CLIENT_VARIATION_STATUS_LABELS,
+  CLIENT_VARIATION_STATUS_TONES,
+  WORKSPACE_BADGE_TONES,
+  WORKSPACE_STATUS_LABELS,
+} from "~/lib/types";
 
 export const Route = createFileRoute("/admin/companies/$companyId/view-as-client")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -52,6 +84,13 @@ export const Route = createFileRoute("/admin/companies/$companyId/view-as-client
         notifications: null,
         conversations: [],
         thread: null,
+        documents: [],
+        milestones: [],
+        approvals: null,
+        issues: [],
+        variations: [],
+        invoices: [],
+        reports: [],
         section: deps.section,
         loadErrors: [] as string[],
       };
@@ -67,6 +106,13 @@ export const Route = createFileRoute("/admin/companies/$companyId/view-as-client
     let notifications: { notifications: ClientNotification[]; unreadCount: number } | null = null;
     let conversations: ClientConversation[] = [];
     let thread: ClientThread | null = null;
+    let documents: ClientDocument[] = [];
+    let milestones: ClientMilestone[] = [];
+    let approvals: ClientApprovals | null = null;
+    let issues: ClientIssue[] = [];
+    let variations: ClientVariation[] = [];
+    let invoices: ClientInvoice[] = [];
+    let reports: ClientProgressReport[] = [];
 
     if (section === "dashboard") {
       const r = await getViewAsClientDashboard({ data: { orgId } });
@@ -101,6 +147,34 @@ export const Route = createFileRoute("/admin/companies/$companyId/view-as-client
         if (t.ok) thread = t.data;
         else errors.push(t.error);
       }
+    } else if (section === "documents") {
+      const r = await getViewAsClientDocuments({ data: { orgId, workspaceId: deps.ws } });
+      if (r.ok) documents = r.data;
+      else errors.push(r.error);
+    } else if (section === "milestones") {
+      const r = await getViewAsClientMilestones({ data: { orgId, workspaceId: deps.ws } });
+      if (r.ok) milestones = r.data;
+      else errors.push(r.error);
+    } else if (section === "approvals") {
+      const r = await getViewAsClientApprovals({ data: { orgId } });
+      if (r.ok) approvals = r.data;
+      else errors.push(r.error);
+    } else if (section === "issues") {
+      const r = await getViewAsClientIssues({ data: { orgId, workspaceId: deps.ws } });
+      if (r.ok) issues = r.data;
+      else errors.push(r.error);
+    } else if (section === "variations") {
+      const r = await getViewAsClientVariations({ data: { orgId, workspaceId: deps.ws } });
+      if (r.ok) variations = r.data;
+      else errors.push(r.error);
+    } else if (section === "invoices") {
+      const r = await getViewAsClientInvoices({ data: { orgId, workspaceId: deps.ws } });
+      if (r.ok) invoices = r.data;
+      else errors.push(r.error);
+    } else if (section === "reports") {
+      const r = await getViewAsClientReports({ data: { orgId } });
+      if (r.ok) reports = r.data;
+      else errors.push(r.error);
     }
 
     return {
@@ -115,6 +189,13 @@ export const Route = createFileRoute("/admin/companies/$companyId/view-as-client
       notifications,
       conversations,
       thread,
+      documents,
+      milestones,
+      approvals,
+      issues,
+      variations,
+      invoices,
+      reports,
       section,
       loadErrors: errors,
     };
@@ -193,13 +274,13 @@ function ViewAsClientPage() {
     { key: "team", label: "Team", built: true },
     { key: "messages", label: "Messages", built: true },
     { key: "notifications", label: "Notifications", built: true },
-    { key: "documents", label: "Documents", built: false },
-    { key: "milestones", label: "Milestones", built: false },
-    { key: "approvals", label: "Approvals", built: false },
-    { key: "issues", label: "Issues", built: false },
-    { key: "variations", label: "Variations", built: false },
-    { key: "invoices", label: "Invoices", built: false },
-    { key: "reports", label: "Reports", built: false },
+    { key: "documents", label: "Documents", built: true },
+    { key: "milestones", label: "Milestones", built: true },
+    { key: "approvals", label: "Approvals", built: true },
+    { key: "issues", label: "Issues", built: true },
+    { key: "variations", label: "Variations", built: true },
+    { key: "invoices", label: "Invoices", built: true },
+    { key: "reports", label: "Reports", built: true },
   ];
 
   const sidebar = (
@@ -304,9 +385,13 @@ function ViewAsClientPage() {
           {section === "messages" && (
             <MessagesSection conversations={data.conversations} thread={data.thread} companyId={params.companyId} />
           )}
-          {(section === "documents" || section === "milestones" || section === "approvals" || section === "issues" || section === "variations" || section === "invoices" || section === "reports") && (
-            <ComingSoonSection label={navItems.find((x) => x.key === section)?.label ?? section} />
-          )}
+          {section === "documents" && <DocumentsSection documents={data.documents} />}
+          {section === "milestones" && <MilestonesSection milestones={data.milestones} />}
+          {section === "approvals" && <ApprovalsSection approvals={data.approvals} />}
+          {section === "issues" && <IssuesSection issues={data.issues} />}
+          {section === "variations" && <VariationsSection variations={data.variations} />}
+          {section === "invoices" && <InvoicesSection invoices={data.invoices} />}
+          {section === "reports" && <ReportsSection reports={data.reports} />}
         </main>
       </div>
     </div>
@@ -932,16 +1017,384 @@ function MessagesSection({
   );
 }
 
-// ------------------------------------------------------------------ stubs
-function ComingSoonSection({ label }: { label: string }) {
+// ------------------------------------------------- Part B + reports sections
+// Read-only mirrors of the client portal Part B screens (spec §12 item 17).
+function fmtMoneyCents(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: currency || "GBP",
+    maximumFractionDigits: 0,
+  }).format(cents / 100);
+}
+function SectionHeader({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
   return (
-    <div className="flex flex-col items-start gap-1 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-10">
-      <p className="text-sm font-bold uppercase tracking-widest text-teal">{label}</p>
-      <h1 className="mt-1 text-2xl font-bold">Coming in Parts B/C</h1>
-      <p className="mt-2 max-w-xl text-sm text-muted">
-        This client portal section is not built yet, so there is nothing client-facing to mirror here.
-        The counts that exist are visible on the dashboard and contract views.
-      </p>
+    <div className="mb-6">
+      <p className="text-sm font-bold uppercase tracking-widest text-teal">{eyebrow}</p>
+      <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{title}</h1>
+      <p className="mt-2 max-w-xl text-sm text-muted">{body}</p>
     </div>
   );
 }
+function DocumentsSection({ documents }: { documents: ClientDocument[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Documents"
+        title="Contract documents"
+        body="Documents the lead contractor shares with this organisation, exactly as the client sees them."
+      />
+      {documents.length === 0 ? (
+        <EmptyState title="No documents" body="No client-visible documents have been shared yet." />
+      ) : (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Document</th>
+                <th className="px-3 py-3">Contract</th>
+                <th className="px-3 py-3">Category</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Shared by</th>
+                <th className="px-5 py-3">Shared at</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {documents.map((d) => (
+                <tr key={d.id} className="hover:bg-mist/60">
+                  <td className="max-w-[260px] truncate px-5 py-3 font-semibold text-navy">{d.title}</td>
+                  <td className="max-w-[180px] truncate px-3 py-3 text-muted">{d.workspaceTitle ?? "-"}</td>
+                  <td className="px-3 py-3 text-muted">{d.category ? CLIENT_DOCUMENT_CATEGORY_LABELS[d.category] ?? d.category : "-"}</td>
+                  <td className="px-3 py-3">
+                    <Badge tone={CLIENT_DOCUMENT_STATUS_TONES[d.status] ?? "slate"}>{CLIENT_DOCUMENT_STATUS_LABELS[d.status] ?? d.status}</Badge>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{d.uploadedByEmail ?? "-"}</td>
+                  <td className="px-5 py-3 text-muted">{d.sharedAt ? fmtDateTime(d.sharedAt) : fmtDateTime(d.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+function MilestonesSection({ milestones }: { milestones: ClientMilestone[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Milestones"
+        title="Milestones"
+        body="Milestones across this organisation's contracts, exactly as the client sees them."
+      />
+      {milestones.length === 0 ? (
+        <EmptyState title="No milestones" body="No milestones have been created on linked contracts yet." />
+      ) : (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Milestone</th>
+                <th className="px-3 py-3">Contract</th>
+                <th className="px-3 py-3">Work package</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Due</th>
+                <th className="px-5 py-3">Submitted</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {milestones.map((m) => (
+                <tr key={m.id} className="hover:bg-mist/60">
+                  <td className="max-w-[240px] truncate px-5 py-3 font-semibold text-navy">{m.title}</td>
+                  <td className="max-w-[180px] truncate px-3 py-3 text-muted">{m.workspaceTitle ?? "-"}</td>
+                  <td className="max-w-[160px] truncate px-3 py-3 text-muted">{m.workPackageName ?? "-"}</td>
+                  <td className="px-3 py-3">
+                    <Badge tone={CLIENT_MILESTONE_STATUS_TONES[m.status] ?? "slate"}>{CLIENT_MILESTONE_STATUS_LABELS[m.status] ?? m.status}</Badge>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{m.dueDate ? fmtDateTime(m.dueDate) : "-"}</td>
+                  <td className="px-5 py-3 text-muted">{m.submittedAt ? fmtDateTime(m.submittedAt) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+function ApprovalsSection({ approvals }: { approvals: ClientApprovals | null }) {
+  const empty = approvals && approvals.counts.variations + approvals.counts.invoices + approvals.counts.milestones + approvals.counts.documents + approvals.counts.issues === 0;
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Approvals"
+        title="Approvals hub"
+        body="Items waiting for this organisation's decision — the same queue the client sees on the Approvals page."
+      />
+      {!approvals ? (
+        <EmptyState title="Nothing to review" body="No items are waiting for this organisation's approval." />
+      ) : (
+        <div className="grid gap-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {(
+              [
+                ["Variations", approvals.counts.variations],
+                ["Invoices", approvals.counts.invoices],
+                ["Milestones", approvals.counts.milestones],
+                ["Documents", approvals.counts.documents],
+                ["Issues", approvals.counts.issues],
+              ] as [string, number][]
+            ).map(([label, count]) => (
+              <Card key={label} className="p-4 text-center">
+                <p className="text-2xl font-bold text-navy">{count}</p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-wider text-muted">{label}</p>
+              </Card>
+            ))}
+          </div>
+          {!empty && (
+            <>
+              {approvals.variations.length > 0 && (
+                <Card className="p-5">
+                  <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-teal">Variations awaiting decision</h2>
+                  <ul className="divide-y divide-slate-100">
+                    {approvals.variations.map((v) => (
+                      <li key={v.id} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{v.title}</p>
+                          <p className="text-xs text-muted">{v.workspaceTitle}{v.proposedAmountCents != null ? ` · ${fmtMoneyCents(v.proposedAmountCents, "GBP")}` : ""}</p>
+                        </div>
+                        <Badge tone={CLIENT_VARIATION_STATUS_TONES[v.status] ?? "slate"}>{CLIENT_VARIATION_STATUS_LABELS[v.status] ?? v.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+              {approvals.invoices.length > 0 && (
+                <Card className="p-5">
+                  <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-teal">Invoices awaiting review</h2>
+                  <ul className="divide-y divide-slate-100">
+                    {approvals.invoices.map((i) => (
+                      <li key={i.id} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{i.invoiceNumber} — {i.title ?? "Invoice"}</p>
+                          <p className="text-xs text-muted">{i.workspaceTitle} · {fmtMoneyCents(i.amountCents, i.currency)}</p>
+                        </div>
+                        <Badge tone={CLIENT_INVOICE_STATUS_TONES[i.status] ?? "slate"}>{CLIENT_INVOICE_STATUS_LABELS[i.status] ?? i.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+              {approvals.milestones.length > 0 && (
+                <Card className="p-5">
+                  <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-teal">Milestones awaiting review</h2>
+                  <ul className="divide-y divide-slate-100">
+                    {approvals.milestones.map((m) => (
+                      <li key={m.id} className="flex items-center justify-between gap-3 py-2">
+                        <p className="min-w-0 truncate font-semibold text-ink">{m.title} <span className="text-xs font-normal text-muted">· {m.workspaceTitle}</span></p>
+                        <Badge tone={CLIENT_MILESTONE_STATUS_TONES[m.status] ?? "slate"}>{CLIENT_MILESTONE_STATUS_LABELS[m.status] ?? m.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+              {approvals.documents.length > 0 && (
+                <Card className="p-5">
+                  <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-teal">Documents awaiting review</h2>
+                  <ul className="divide-y divide-slate-100">
+                    {approvals.documents.map((d) => (
+                      <li key={d.id} className="flex items-center justify-between gap-3 py-2">
+                        <p className="min-w-0 truncate font-semibold text-ink">{d.title} <span className="text-xs font-normal text-muted">· {d.workspaceTitle}</span></p>
+                        <Badge tone={CLIENT_DOCUMENT_STATUS_TONES[d.status] ?? "slate"}>{CLIENT_DOCUMENT_STATUS_LABELS[d.status] ?? d.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+              {approvals.issues.length > 0 && (
+                <Card className="p-5">
+                  <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-teal">Open issues</h2>
+                  <ul className="divide-y divide-slate-100">
+                    {approvals.issues.map((i) => (
+                      <li key={i.id} className="flex items-center justify-between gap-3 py-2">
+                        <p className="min-w-0 truncate font-semibold text-ink">{i.title} <span className="text-xs font-normal text-muted">· {i.workspaceTitle}</span></p>
+                        <Badge tone={CLIENT_ISSUE_STATUS_TONES[i.status] ?? "slate"}>{CLIENT_ISSUE_STATUS_LABELS[i.status] ?? i.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+            </>
+          )}
+          {empty && <p className="text-sm text-muted">No items currently waiting for approval.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+function IssuesSection({ issues }: { issues: ClientIssue[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Issues"
+        title="Issues & responses"
+        body="Issues raised on this organisation's contracts, exactly as the client sees them."
+      />
+      {issues.length === 0 ? (
+        <EmptyState title="No issues" body="No issues have been raised on linked contracts." />
+      ) : (
+        <div className="flex flex-col gap-4">
+          {issues.map((i) => (
+            <Card key={i.id} className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-bold text-navy">{i.title}</p>
+                  <p className="mt-0.5 text-sm text-muted">{i.workspaceTitle}{i.workPackageName ? ` · ${i.workPackageName}` : ""}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {i.severity && <Badge tone={CLIENT_ISSUE_SEVERITY_TONES[i.severity] ?? "slate"}>{CLIENT_ISSUE_SEVERITY_LABELS[i.severity] ?? i.severity}</Badge>}
+                  <Badge tone={CLIENT_ISSUE_STATUS_TONES[i.status] ?? "slate"}>{CLIENT_ISSUE_STATUS_LABELS[i.status] ?? i.status}</Badge>
+                </div>
+              </div>
+              {i.description && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-muted">{i.description}</p>}
+              {i.response && (
+                <div className="mt-3 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-sm">
+                  <p className="text-xs font-bold uppercase tracking-wider text-teal">Lead response · {i.respondedByEmail ?? "lead contractor"}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-ink">{i.response}</p>
+                </div>
+              )}
+              <p className="mt-3 text-xs text-muted">Raised by {i.raisedByEmail ?? "the client organisation"} · {fmtDateTime(i.createdAt)}</p>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function VariationsSection({ variations }: { variations: ClientVariation[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Variations"
+        title="Variation requests"
+        body="Variations proposed on this organisation's contracts, exactly as the client sees them."
+      />
+      {variations.length === 0 ? (
+        <EmptyState title="No variations" body="No variations have been proposed on linked contracts." />
+      ) : (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Variation</th>
+                <th className="px-3 py-3">Contract</th>
+                <th className="px-3 py-3">Work package</th>
+                <th className="px-3 py-3">Proposed value</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-5 py-3">Requested</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {variations.map((v) => (
+                <tr key={v.id} className="hover:bg-mist/60">
+                  <td className="max-w-[240px] truncate px-5 py-3 font-semibold text-navy">{v.title}</td>
+                  <td className="max-w-[180px] truncate px-3 py-3 text-muted">{v.workspaceTitle ?? "-"}</td>
+                  <td className="max-w-[150px] truncate px-3 py-3 text-muted">{v.workPackageName ?? "-"}</td>
+                  <td className="px-3 py-3">{v.proposedAmountCents != null ? fmtMoneyCents(v.proposedAmountCents, "GBP") : "-"}</td>
+                  <td className="px-3 py-3">
+                    <Badge tone={CLIENT_VARIATION_STATUS_TONES[v.status] ?? "slate"}>{CLIENT_VARIATION_STATUS_LABELS[v.status] ?? v.status}</Badge>
+                  </td>
+                  <td className="px-5 py-3 text-muted">{fmtDateTime(v.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+function InvoicesSection({ invoices }: { invoices: ClientInvoice[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Invoices"
+        title="Invoices"
+        body="Invoices issued on this organisation's contracts, exactly as the client sees them."
+      />
+      {invoices.length === 0 ? (
+        <EmptyState title="No invoices" body="No invoices have been issued on linked contracts." />
+      ) : (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-muted">
+                <th className="px-5 py-3">Invoice</th>
+                <th className="px-3 py-3">Contract</th>
+                <th className="px-3 py-3">Supplier</th>
+                <th className="px-3 py-3">Amount</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Due</th>
+                <th className="px-5 py-3">Paid</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {invoices.map((i) => (
+                <tr key={i.id} className="hover:bg-mist/60">
+                  <td className="px-5 py-3 font-semibold text-navy">{i.invoiceNumber}</td>
+                  <td className="max-w-[180px] truncate px-3 py-3 text-muted">{i.workspaceTitle ?? "-"}</td>
+                  <td className="max-w-[160px] truncate px-3 py-3 text-muted">{i.supplierCompanyName ?? "-"}</td>
+                  <td className="px-3 py-3 font-semibold">{fmtMoneyCents(i.amountCents, i.currency)}</td>
+                  <td className="px-3 py-3">
+                    <Badge tone={CLIENT_INVOICE_STATUS_TONES[i.status] ?? "slate"}>{CLIENT_INVOICE_STATUS_LABELS[i.status] ?? i.status}</Badge>
+                  </td>
+                  <td className="px-3 py-3 text-muted">{i.dueDate ? fmtDateTime(i.dueDate) : "-"}</td>
+                  <td className="px-5 py-3 text-muted">{i.paidAt ? fmtDateTime(i.paidAt) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+}
+function ReportsSection({ reports }: { reports: ClientProgressReport[] }) {
+  return (
+    <div>
+      <SectionHeader
+        eyebrow="Reports"
+        title="Progress reports"
+        body="Progress reports submitted by the lead contractor for this organisation, exactly as the client sees them."
+      />
+      {reports.length === 0 ? (
+        <EmptyState title="No reports yet" body="Progress reports submitted by the lead contractor will appear here." />
+      ) : (
+        <div className="flex flex-col gap-4">
+          {reports.map((r) => (
+            <Card key={r.id} className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-lg font-bold text-navy">{r.title ?? "Progress report"}</p>
+                  <p className="mt-0.5 text-sm text-muted">
+                    {r.workspaceTitle}
+                    {r.milestoneTitle ? ` · ${r.milestoneTitle}` : ""}
+                  </p>
+                </div>
+                <Badge tone="teal">
+                  {r.periodStart ? fmtDateTime(r.periodStart).slice(0, 10) : "-"} – {r.periodEnd ? fmtDateTime(r.periodEnd).slice(0, 10) : "-"}
+                </Badge>
+              </div>
+              {r.body && <p className="mt-3 line-clamp-3 whitespace-pre-wrap text-sm text-muted">{r.body}</p>}
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs text-muted">
+                <span>Submitted by {r.submittedByEmail ?? "the lead contractor"}</span>
+                <span aria-hidden>·</span>
+                <span>{fmtDateTime(r.createdAt)}</span>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+

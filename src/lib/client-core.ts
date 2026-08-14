@@ -839,11 +839,11 @@ export const CLIENT_SYSTEM_ROLES: Role[] = ROLES.filter(
 // client can see has one of the typed statuses below.
 
 // ------------------------------------------------------- status projections
-function mapDocumentStatus(s: string): ClientDocument["status"] {
+export function mapDocumentStatus(s: string): ClientDocument["status"] {
   return s as ClientDocument["status"];
 }
 
-function mapMilestoneStatus(s: string): ClientMilestone["status"] {
+export function mapMilestoneStatus(s: string): ClientMilestone["status"] {
   switch (s) {
     case "upcoming":
     case "in_progress":
@@ -861,7 +861,7 @@ function mapMilestoneStatus(s: string): ClientMilestone["status"] {
   }
 }
 
-function mapIssueStatus(s: string): ClientIssue["status"] {
+export function mapIssueStatus(s: string): ClientIssue["status"] {
   switch (s) {
     case "under_review":
     case "action_required":
@@ -878,7 +878,7 @@ function mapIssueStatus(s: string): ClientIssue["status"] {
   }
 }
 
-function mapVariationStatus(s: string): ClientVariation["status"] {
+export function mapVariationStatus(s: string): ClientVariation["status"] {
   switch (s) {
     case "submitted":
     case "under_client_review":
@@ -897,7 +897,7 @@ function mapVariationStatus(s: string): ClientVariation["status"] {
   }
 }
 
-function mapInvoiceStatus(s: string): ClientInvoice["status"] {
+export function mapInvoiceStatus(s: string): ClientInvoice["status"] {
   switch (s) {
     case "under_review":
     case "overdue":
@@ -2285,7 +2285,7 @@ export async function doMarkAllClientNotificationsRead(
   }
 }
 // ------------------------------------------------ shared row mappers (Part B)
-function mapDocumentRow(r: {
+export function mapDocumentRow(r: {
   id: string;
   workspace_id: string;
   workspace_title: string | null;
@@ -2315,7 +2315,7 @@ function mapDocumentRow(r: {
   };
 }
 
-function mapMilestoneRow(r: {
+export function mapMilestoneRow(r: {
   id: string;
   workspace_id: string;
   workspace_title: string | null;
@@ -2349,7 +2349,7 @@ function mapMilestoneRow(r: {
   };
 }
 
-function mapIssueRow(r: {
+export function mapIssueRow(r: {
   id: string;
   workspace_id: string;
   workspace_title: string | null;
@@ -2387,7 +2387,7 @@ function mapIssueRow(r: {
   };
 }
 
-function mapVariationRow(r: {
+export function mapVariationRow(r: {
   id: string;
   workspace_id: string;
   workspace_title: string | null;
@@ -2423,7 +2423,7 @@ function mapVariationRow(r: {
   };
 }
 
-function mapInvoiceRow(r: {
+export function mapInvoiceRow(r: {
   id: string;
   workspace_id: string;
   workspace_title: string | null;

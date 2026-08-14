@@ -10,11 +10,18 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   doEnterViewAsClient,
   doExitViewAsClient,
+  doGetViewAsClientApprovals,
   doGetViewAsClientContract,
   doGetViewAsClientContracts,
   doGetViewAsClientDashboard,
+  doGetViewAsClientDocuments,
+  doGetViewAsClientInvoices,
+  doGetViewAsClientIssues,
+  doGetViewAsClientMilestones,
   doGetViewAsClientOrg,
+  doGetViewAsClientReports,
   doGetViewAsClientSession,
+  doGetViewAsClientVariations,
   doListViewAsClientConversations,
   doListViewAsClientMessages,
   doListViewAsClientNotifications,
@@ -80,3 +87,25 @@ export const listViewAsClientMessages = createServerFn({ method: "GET" })
       d as { orgId: string; workspaceId: string; threadKey: string },
   )
   .handler(({ data }) => doListViewAsClientMessages(data));
+
+export const getViewAsClientDocuments = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doGetViewAsClientDocuments(data.orgId, data.workspaceId));
+export const getViewAsClientMilestones = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doGetViewAsClientMilestones(data.orgId, data.workspaceId));
+export const getViewAsClientIssues = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doGetViewAsClientIssues(data.orgId, data.workspaceId));
+export const getViewAsClientVariations = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doGetViewAsClientVariations(data.orgId, data.workspaceId));
+export const getViewAsClientInvoices = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string; workspaceId?: string })
+  .handler(({ data }) => doGetViewAsClientInvoices(data.orgId, data.workspaceId));
+export const getViewAsClientApprovals = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doGetViewAsClientApprovals(data.orgId));
+export const getViewAsClientReports = createServerFn({ method: "GET" })
+  .validator((d: unknown) => d as { orgId: string })
+  .handler(({ data }) => doGetViewAsClientReports(data.orgId));
